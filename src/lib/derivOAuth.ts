@@ -9,14 +9,24 @@ export const REGISTERED_APP_ID = '347FrwAYb8ptoUsbiGVsA';
 
 /**
  * Constructs the official Deriv OAuth redirect URL for browser authentication.
- * Uses /callback endpoint for Deriv app redirect requirement.
+ * Automatically chooses between Deriv OAuth2 (auth.deriv.com with client_id) for alphanumeric IDs
+ * and Legacy OAuth (oauth.deriv.com with app_id) for numeric IDs.
  */
 export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
-  const effectiveAppId = appId || (import.meta as any).env?.VITE_DERIV_APP_ID || REGISTERED_APP_ID;
+  const effectiveAppId = (appId || (import.meta as any).env?.VITE_DERIV_APP_ID || REGISTERED_APP_ID).trim();
 
-  // Official Deriv OAuth authorize endpoint
+  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA from api.deriv.com), use auth.deriv.com
+  const isAlphanumeric = /[a-zA-Z]/.test(effectiveAppId);
+
+  if (isAlphanumeric) {
+    return `https://auth.deriv.com/oauth2/auth?client_id=${effectiveAppId}&redirect_uri=${encodeURIComponent(
+      redirectUri
+    )}&response_type=token`;
+  }
+
+  // Otherwise use numeric app_id endpoint
   return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
   )}`;
