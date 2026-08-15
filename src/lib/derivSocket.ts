@@ -6,7 +6,7 @@ type TickListener = (tick: TickData) => void;
 
 class DerivSocketService {
   private ws: WebSocket | null = null;
-  private appId: string = '1089'; // Sandbox / Default App ID
+  private appId: string = '1089'; // Default public numeric App ID for WebSocket feed
   private token: string | null = null;
   private connectionState: ConnectionState = 'disconnected';
   private pingIntervalId: any = null;
@@ -46,9 +46,9 @@ class DerivSocketService {
   }
 
   public setToken(token: string | null) {
-    this.token = token;
-    if (this.connectionState === 'connected' && token) {
-      this.authorize(token);
+    this.token = token ? token.trim() : null;
+    if (this.connectionState === 'connected' && this.token) {
+      this.authorize(this.token);
     }
   }
 
@@ -237,8 +237,12 @@ class DerivSocketService {
   // --- DERIV SPECIFIC API HELPERS ---
 
   public async authorize(token: string) {
-    this.token = token;
-    return this.sendRequest({ authorize: token });
+    if (!token || typeof token !== 'string' || !token.trim()) {
+      return { error: { message: 'Invalid token: token cannot be empty.' } };
+    }
+    const cleanToken = token.trim();
+    this.token = cleanToken;
+    return this.sendRequest({ authorize: cleanToken });
   }
 
   public async getActiveSymbols(): Promise<SyntheticSymbol[]> {

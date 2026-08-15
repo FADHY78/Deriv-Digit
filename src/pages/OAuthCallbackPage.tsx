@@ -99,10 +99,17 @@ export const OAuthCallbackPage: React.FC = () => {
       }
 
       const primaryAccount = oauthAccounts[0];
+      const tokenToAuthorize = (primaryAccount.token || '').trim();
+
+      if (!tokenToAuthorize) {
+        setStatus('error');
+        setErrorMessage('Deriv did not provide a valid authentication token. Please try logging in again.');
+        return;
+      }
 
       try {
         await derivSocket.connect(); // Connect using standard Deriv WebSocket stream
-        const res = await derivSocket.authorize(primaryAccount.token);
+        const res = await derivSocket.authorize(tokenToAuthorize);
 
         if (res.error) {
           throw new Error(res.error.message || 'Deriv token authorization failed.');
@@ -111,7 +118,7 @@ export const OAuthCallbackPage: React.FC = () => {
         const authInfo = res.authorize;
         const isRealAccount = Boolean(authInfo.is_virtual === 0);
 
-        setToken(primaryAccount.token, true);
+        setToken(tokenToAuthorize, true);
         setAvailableOAuthAccounts(oauthAccounts);
         setAccountDetails({
           accountId: authInfo.loginid,
@@ -206,7 +213,7 @@ export const OAuthCallbackPage: React.FC = () => {
                 to="/login"
                 className="w-full py-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-xs font-mono font-bold text-white rounded-2xl transition shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2"
               >
-                <span>Return to Login (Start Fresh Login)</span>
+                <span>Start Fresh Login</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
