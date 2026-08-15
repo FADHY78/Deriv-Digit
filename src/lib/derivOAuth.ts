@@ -52,8 +52,8 @@ export async function generateCodeChallenge(verifier: string): Promise<string> {
 }
 
 /**
- * Constructs the official Deriv OAuth redirect URL for browser authentication with PKCE, State, and Scopes.
- * Follows format: https://auth.deriv.com/oauth2/auth?client_id=...&response_type=code&redirect_uri=...&scope=read%20trade%20payments%20trading_information
+ * Constructs the official Deriv OAuth redirect URL for browser authentication with PKCE & State.
+ * Does not force unpermitted scope parameters so Deriv uses the registered scopes on the App ID.
  */
 export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promise<string> {
   const currentOrigin = window.location.origin;
@@ -81,13 +81,13 @@ export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promi
       redirectUri
     )}&state=${encodeURIComponent(state)}&code_challenge=${encodeURIComponent(
       codeChallenge
-    )}&code_challenge_method=S256&scope=read%20trade%20payments%20trading_information`;
+    )}&code_challenge_method=S256`;
   }
 
   // Otherwise use legacy numeric app_id endpoint
   return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
-  )}&state=${encodeURIComponent(state)}&scope=read%20trade%20payments%20trading_information`;
+  )}&state=${encodeURIComponent(state)}`;
 }
 
 /**
