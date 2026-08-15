@@ -95,6 +95,7 @@ export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promi
 /**
  * Exchanges OAuth2 authorization code via serverless backend route (/api/oauth-token)
  * or direct to https://auth.deriv.com/oauth2/token with PKCE code_verifier per docs.
+ * Also retrieves account details from https://api.derivws.com/trading/v1/options/accounts.
  */
 export async function exchangeOAuthCodeForTokens(
   code: string,
@@ -163,6 +164,7 @@ export async function exchangeOAuthCodeForTokens(
 
   const accounts: OAuthAccount[] = [];
 
+  // Parse accounts if provided directly
   if (Array.isArray(data.accounts)) {
     data.accounts.forEach((acc: any) => {
       accounts.push({
@@ -174,13 +176,41 @@ export async function exchangeOAuthCodeForTokens(
     });
   }
 
+  // If token received without explicit accounts list, fetch accounts via Deriv REST API
   if (accounts.length === 0 && data.access_token) {
-    accounts.push({
-      accountId: 'DERIV_USER',
-      token: data.access_token,
-      currency: 'USD',
-      isVirtual: false,
-    });
+    try {
+      const accountsRes = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
+        headers: {
+          'Authorization': `Bearer ${data.access_token}`,
+          'Deriv-App-ID': clientId,
+        },
+      });
+
+      if (accountsRes.ok) {
+        const accountsJson = await accountsRes.json();
+        if (Array.isArray(accountsJson.data)) {
+          accountsJson.data.forEach((acc: any) => {
+            accounts.push({
+              accountId: acc.account_id || 'DERIV_ACCOUNT',
+              token: data.access_token,
+              currency: acc.currency || 'USD',
+              isVirtual: acc.account_type === 'demo',
+            });
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[OAuth] Could not fetch options accounts list via REST:', e);
+    }
+
+    if (accounts.length === 0) {
+      accounts.push({
+        accountId: 'DERIV_USER',
+        token: data.access_token,
+        currency: 'USD',
+        isVirtual: false,
+      });
+    }
   }
 
   return accounts;

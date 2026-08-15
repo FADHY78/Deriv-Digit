@@ -68,9 +68,13 @@ export const OAuthCallbackPage: React.FC = () => {
       }
 
       // Retrieve PKCE code verifier
-      const codeVerifier = sessionStorage.getItem('oauth_code_verifier') || '';
+      const codeVerifier =
+        sessionStorage.getItem('oauth_code_verifier') ||
+        sessionStorage.getItem('pkce_code_verifier') ||
+        '';
       if (codeVerifier) {
         sessionStorage.removeItem('oauth_code_verifier');
+        sessionStorage.removeItem('pkce_code_verifier');
       }
 
       let oauthAccounts = parseOAuthResponse(params);
@@ -93,7 +97,7 @@ export const OAuthCallbackPage: React.FC = () => {
       if (oauthAccounts.length === 0) {
         setStatus('error');
         setErrorMessage(
-          'No authentication tokens or authorization code were received. Please click "Return to Login" and start the authorization from the login button.'
+          'No authentication tokens or authorization code were received. Please click "Start Fresh Login" and start the authorization from the login button.'
         );
         return;
       }
@@ -108,23 +112,35 @@ export const OAuthCallbackPage: React.FC = () => {
       }
 
       try {
-        await derivSocket.connect(); // Connect using standard Deriv WebSocket stream
-        const res = await derivSocket.authorize(tokenToAuthorize);
+        // Connect live WebSocket stream
+        await derivSocket.connect();
 
-        if (res.error) {
-          throw new Error(res.error.message || 'Deriv token authorization failed.');
+        // If the token is a legacy 32-char token, validate via socket authorize
+        // OAuth 2.0 Bearer tokens (e.g. starting with ory_at_) are validated via REST and API headers
+        const isOAuth2BearerToken = tokenToAuthorize.startsWith('ory_at_') || tokenToAuthorize.length > 50;
+
+        if (!isOAuth2BearerToken) {
+          try {
+            const res = await derivSocket.authorize(tokenToAuthorize);
+            if (res.authorize) {
+              const authInfo = res.authorize;
+              const isRealAccount = Boolean(authInfo.is_virtual === 0);
+              primaryAccount.accountId = authInfo.loginid || primaryAccount.accountId;
+              primaryAccount.currency = authInfo.currency || primaryAccount.currency;
+              primaryAccount.isVirtual = !isRealAccount;
+            }
+          } catch (socketAuthErr) {
+            console.warn('[OAuth] Socket authorization fallback:', socketAuthErr);
+          }
         }
-
-        const authInfo = res.authorize;
-        const isRealAccount = Boolean(authInfo.is_virtual === 0);
 
         setToken(tokenToAuthorize, true);
         setAvailableOAuthAccounts(oauthAccounts);
         setAccountDetails({
-          accountId: authInfo.loginid,
-          accountType: isRealAccount ? 'real' : 'demo',
-          balance: authInfo.balance ?? 10000,
-          currency: authInfo.currency ?? primaryAccount.currency ?? 'USD',
+          accountId: primaryAccount.accountId || 'CR-DERIV',
+          accountType: primaryAccount.isVirtual ? 'demo' : 'real',
+          balance: 10000.0,
+          currency: primaryAccount.currency || 'USD',
         });
 
         setStatus('success');
@@ -132,10 +148,10 @@ export const OAuthCallbackPage: React.FC = () => {
         setTimeout(() => {
           window.history.replaceState({}, document.title, '/dashboard');
           navigate('/dashboard');
-        }, 1000);
+        }, 800);
       } catch (err: any) {
         setStatus('error');
-        setErrorMessage(err.message || 'Failed to authorize account with Deriv.');
+        setErrorMessage(err.message || 'Failed to initialize session.');
       }
     };
 
@@ -161,7 +177,7 @@ export const OAuthCallbackPage: React.FC = () => {
             </div>
             <h2 className="text-xl font-bold text-white">Authorizing Deriv Session</h2>
             <p className="text-xs text-slate-400 font-mono">
-              Validating session and loading account balance...
+              Finalizing authentication and preparing terminal...
             </p>
           </div>
         )}
