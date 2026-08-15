@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ShieldCheck, ShieldAlert, RefreshCw, ArrowRight, Zap, ExternalLink, Copy, Check } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
@@ -20,7 +20,13 @@ export const OAuthCallbackPage: React.FC = () => {
   const [debugUrl, setDebugUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
 
+  // Prevent double execution of single-use authorization code in React
+  const hasExecutedRef = useRef(false);
+
   useEffect(() => {
+    if (hasExecutedRef.current) return;
+    hasExecutedRef.current = true;
+
     const processCallback = async () => {
       const fullUrl = window.location.href;
       setDebugUrl(fullUrl);
@@ -78,7 +84,7 @@ export const OAuthCallbackPage: React.FC = () => {
           setStatus('error');
           setErrorMessage(
             exchangeErr.message ||
-            'Failed to exchange authorization code with Deriv token endpoint.'
+            'Failed to exchange authorization code with Deriv token endpoint. The code may have expired or already been used.'
           );
           return;
         }
@@ -148,7 +154,7 @@ export const OAuthCallbackPage: React.FC = () => {
             </div>
             <h2 className="text-xl font-bold text-white">Authorizing Deriv Session</h2>
             <p className="text-xs text-slate-400 font-mono">
-              Validating PKCE challenge & exchanging authorization code...
+              Exchanging single-use code & validating PKCE verifier...
             </p>
           </div>
         )}
@@ -200,7 +206,7 @@ export const OAuthCallbackPage: React.FC = () => {
                 to="/login"
                 className="w-full py-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-xs font-mono font-bold text-white rounded-2xl transition shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2"
               >
-                <span>Return to Login Page</span>
+                <span>Return to Login (Start Fresh Login)</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
