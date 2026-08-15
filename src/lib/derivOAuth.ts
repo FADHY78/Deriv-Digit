@@ -52,8 +52,8 @@ export async function generateCodeChallenge(verifier: string): Promise<string> {
 }
 
 /**
- * Constructs the official Deriv OAuth redirect URL for browser authentication with PKCE & State.
- * Follows exact format: https://auth.deriv.com/oauth2/auth?client_id=YOUR_APP_ID&response_type=code&redirect_uri=...&state=...&code_challenge=...&code_challenge_method=S256
+ * Constructs the official Deriv OAuth redirect URL for browser authentication with PKCE, State, and Scopes.
+ * Follows format: https://auth.deriv.com/oauth2/auth?client_id=...&response_type=code&redirect_uri=...&scope=read%20trade%20payments%20trading_information
  */
 export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promise<string> {
   const currentOrigin = window.location.origin;
@@ -74,7 +74,6 @@ export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promi
   sessionStorage.setItem('oauth_code_verifier', codeVerifier);
   const codeChallenge = await generateCodeChallenge(codeVerifier);
 
-  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA), use auth.deriv.com with PKCE
   const isAlphanumeric = /[a-zA-Z]/.test(effectiveAppId);
 
   if (isAlphanumeric) {
@@ -82,13 +81,13 @@ export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promi
       redirectUri
     )}&state=${encodeURIComponent(state)}&code_challenge=${encodeURIComponent(
       codeChallenge
-    )}&code_challenge_method=S256`;
+    )}&code_challenge_method=S256&scope=read%20trade%20payments%20trading_information`;
   }
 
   // Otherwise use legacy numeric app_id endpoint
   return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
-  )}&state=${encodeURIComponent(state)}`;
+  )}&state=${encodeURIComponent(state)}&scope=read%20trade%20payments%20trading_information`;
 }
 
 /**
