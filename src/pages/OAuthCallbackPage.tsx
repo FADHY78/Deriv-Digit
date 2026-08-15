@@ -101,7 +101,7 @@ export const OAuthCallbackPage: React.FC = () => {
       const primaryAccount = oauthAccounts[0];
 
       try {
-        await derivSocket.connect(appId);
+        await derivSocket.connect(); // Connect using standard Deriv WebSocket stream
         const res = await derivSocket.authorize(primaryAccount.token);
 
         if (res.error) {
@@ -128,7 +128,7 @@ export const OAuthCallbackPage: React.FC = () => {
         }, 1000);
       } catch (err: any) {
         setStatus('error');
-        setErrorMessage(err.message || 'Failed to complete Deriv authorization handshake.');
+        setErrorMessage(err.message || 'Failed to authorize account with Deriv.');
       }
     };
 
@@ -154,7 +154,7 @@ export const OAuthCallbackPage: React.FC = () => {
             </div>
             <h2 className="text-xl font-bold text-white">Authorizing Deriv Session</h2>
             <p className="text-xs text-slate-400 font-mono">
-              Exchanging single-use code & validating PKCE verifier...
+              Validating session and loading account balance...
             </p>
           </div>
         )}

@@ -63,7 +63,10 @@ class DerivSocketService {
 
       this.updateState('connecting');
       const baseEndpoint = this.endpoints[this.currentEndpointIndex % this.endpoints.length];
-      const url = `${baseEndpoint}?app_id=${this.appId}`;
+
+      // WebSocket URL requires a numeric app_id (fallback to 1089 if alphanumeric OAuth client_id was passed)
+      const numericAppId = /^\d+$/.test(this.appId) ? this.appId : '1089';
+      const url = `${baseEndpoint}?app_id=${numericAppId}&l=en&brand=deriv`;
 
       try {
         this.ws = new WebSocket(url);
