@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { ShieldCheck, ShieldAlert, RefreshCw, ArrowRight, Zap } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, RefreshCw, ArrowRight, Zap, ExternalLink } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { derivSocket } from '../lib/derivSocket';
 import { parseOAuthResponse } from '../lib/derivOAuth';
@@ -20,20 +20,36 @@ export const OAuthCallbackPage: React.FC = () => {
 
   useEffect(() => {
     const processCallback = async () => {
-      // 1. Check query parameters (?acct1=...&token1=...)
-      let params = searchParams;
+      // 1. Collect params from search query (?...) and hash fragment (#...)
+      const fullUrl = window.location.href;
+      let params = new URLSearchParams(window.location.search);
 
-      // Also check hash fragment if OAuth returned tokens after #
-      if (!params.has('token1') && window.location.hash) {
-        const hashQuery = window.location.hash.substring(1);
-        params = new URLSearchParams(hashQuery);
+      // Check if Deriv returned parameters after the hash (#acct1=...&token1=...)
+      if (window.location.hash) {
+        const hashContent = window.location.hash.substring(1);
+        const hashParams = new URLSearchParams(hashContent);
+        // Merge hash params if search params don't have token
+        if (!params.has('token1') && !params.has('token')) {
+          params = hashParams;
+        }
+      }
+
+      // Check for explicit error responses from Deriv OAuth
+      const error = params.get('error') || params.get('error_code');
+      const errorDesc = params.get('error_description') || params.get('msg');
+      if (error || errorDesc) {
+        setStatus('error');
+        setErrorMessage(errorDesc || `Deriv OAuth returned: ${error}`);
+        return;
       }
 
       const oauthAccounts = parseOAuthResponse(params);
 
       if (oauthAccounts.length === 0) {
         setStatus('error');
-        setErrorMessage('No authentication tokens were received from Deriv. Please try logging in again.');
+        setErrorMessage(
+          'No authentication tokens were received from Deriv. If you opened /callback directly, please click the login button on the login page.'
+        );
         return;
       }
 
@@ -61,11 +77,11 @@ export const OAuthCallbackPage: React.FC = () => {
 
         setStatus('success');
 
-        // Clean URL and navigate to dashboard after brief success display
+        // Clean URL and navigate to dashboard
         setTimeout(() => {
           window.history.replaceState({}, document.title, '/dashboard');
           navigate('/dashboard');
-        }, 1200);
+        }, 1000);
       } catch (err: any) {
         setStatus('error');
         setErrorMessage(err.message || 'Failed to complete Deriv authorization handshake.');
@@ -110,16 +126,16 @@ export const OAuthCallbackPage: React.FC = () => {
             <div className="inline-flex p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400">
               <ShieldAlert className="w-8 h-8" />
             </div>
-            <h2 className="text-xl font-bold text-white">Authentication Failed</h2>
-            <p className="text-xs text-rose-300 font-mono bg-rose-950/60 p-3 rounded-xl border border-rose-800/60">
+            <h2 className="text-xl font-bold text-white">Authentication Notice</h2>
+            <p className="text-xs text-rose-300 font-mono bg-rose-950/60 p-3 rounded-xl border border-rose-800/60 leading-relaxed text-left">
               {errorMessage}
             </p>
-            <div className="pt-2">
+            <div className="flex flex-col gap-2 pt-2">
               <Link
                 to="/login"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono font-bold text-white rounded-2xl transition shadow-sm"
+                className="w-full py-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-xs font-mono font-bold text-white rounded-2xl transition shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2"
               >
-                <span>Return to Login</span>
+                <span>Return to Login Page</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
