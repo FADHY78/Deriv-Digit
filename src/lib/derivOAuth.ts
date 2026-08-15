@@ -14,7 +14,7 @@ export function getDerivOAuthUrl(appId: string = '1089'): string {
   const redirectUri = `${currentOrigin}/callback`;
 
   // Deriv OAuth endpoint: redirects to /callback with acctX, tokenX, and curX params
-  return `https://oauth.deriv.com/oauth2/authorize?app_id=${appId}&l=en&redirect_uri=${encodeURIComponent(
+  return `https://oauth.deriv.com/oauth2/authorize?app_id=${appId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
   )}`;
 }

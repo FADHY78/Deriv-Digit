@@ -23,7 +23,7 @@ export const LoginPage: React.FC = () => {
   const [inputToken, setInputToken] = useState(token);
   const [inputAppId, setInputAppId] = useState(appId);
   const [remember, setRemember] = useState(rememberMe);
-  const [activeTab, setActiveTab] = useState<'TOKEN' | 'DEMO_SANDBOX' | 'OAUTH'>('TOKEN');
+  const [activeTab, setActiveTab] = useState<'OAUTH' | 'TOKEN' | 'DEMO_SANDBOX'>('OAUTH');
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export const LoginPage: React.FC = () => {
     }
   }, [searchParams, inputAppId, setToken, setAvailableOAuthAccounts, setAccountDetails, navigate]);
 
-  // Method 1: Connect via Deriv API Token (Works 100% on localhost)
+  // Method 1: Connect via Deriv API Token (Instant)
   const handleTokenLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputToken.trim()) {
@@ -112,14 +112,13 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Method 2: Instant Virtual Sandbox Mode (No token needed, uses live real-time Deriv ticks)
+  // Method 2: Instant Virtual Sandbox Mode
   const handleInstantDemoMode = async () => {
     setIsLoading(true);
     setErrorMsg(null);
 
     try {
       await derivSocket.connect(inputAppId);
-      // Setup demo guest session with live public feeds
       setToken('DEMO_SANDBOX_TOKEN', false);
       setAccountDetails({
         accountId: 'VRTC-DEMO-GUEST',
@@ -135,7 +134,7 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Method 3: Deriv OAuth (requires registered redirect URI for non-localhost or custom registered App ID)
+  // Method 3: 1-Click Deriv OAuth
   const handleOAuthLogin = () => {
     if (inputAppId !== appId) {
       setAppId(inputAppId);
@@ -148,17 +147,17 @@ export const LoginPage: React.FC = () => {
     <div className="max-w-2xl mx-auto my-8 p-4 space-y-6">
       {/* Top Header */}
       <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-slate-800/80 shadow-2xl space-y-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-0 right-0 w-80 h-80 bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="text-center space-y-2 relative z-10">
-          <div className="inline-flex p-3.5 bg-gradient-to-tr from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 rounded-2xl text-cyan-400 mb-1 shadow-lg shadow-cyan-950/40">
+          <div className="inline-flex p-3.5 bg-gradient-to-tr from-red-600/20 to-rose-600/20 border border-red-500/30 rounded-2xl text-red-400 mb-1 shadow-lg shadow-red-950/40">
             <KeyRound className="w-8 h-8" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-            Deriv Terminal Authentication
+            Connect Deriv Account
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 max-w-lg mx-auto">
-            Choose your preferred authentication method to connect live WebSocket market streams and digit analyzer.
+            Authorize your browser session to stream real-time synthetic index ticks and execute digit contracts.
           </p>
         </div>
 
@@ -176,6 +175,18 @@ export const LoginPage: React.FC = () => {
         <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-2xl relative z-10 shadow-inner">
           <button
             type="button"
+            onClick={() => setActiveTab('OAUTH')}
+            className={`py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all ${
+              activeTab === 'OAUTH'
+                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-rose-950/50 scale-[1.02]'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            🌐 1-Click OAuth
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('TOKEN')}
             className={`py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all ${
               activeTab === 'TOKEN'
@@ -183,7 +194,7 @@ export const LoginPage: React.FC = () => {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            🔑 API Token (Localhost)
+            🔑 API Token
           </button>
 
           <button
@@ -195,31 +206,74 @@ export const LoginPage: React.FC = () => {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            ⚡ 1-Click Sandbox
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('OAUTH')}
-            className={`py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all ${
-              activeTab === 'OAUTH'
-                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-rose-950/50 scale-[1.02]'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            🌐 Deriv OAuth
+            ⚡ Sandbox
           </button>
         </div>
 
-        {/* --- TAB 1: API TOKEN (RECOMMENDED FOR LOCALHOST) --- */}
+        {/* --- TAB 1: DERIV OAUTH (1-CLICK BROWSER LOGIN) --- */}
+        {activeTab === 'OAUTH' && (
+          <div className="space-y-5 relative z-10 animate-in fade-in duration-200">
+            {/* App ID & Registration Helper */}
+            <div className="bg-gradient-to-br from-red-950/30 via-slate-900 to-slate-950 border border-red-500/30 rounded-2xl p-4.5 space-y-3">
+              <div className="flex items-center justify-between text-xs text-red-300 font-bold font-mono">
+                <span className="flex items-center gap-1.5">
+                  <Globe className="w-4 h-4 text-red-400" />
+                  Deriv Registered App ID
+                </span>
+                <a
+                  href="https://api.deriv.com/apps/manage"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 rounded-lg text-[11px] text-red-200 flex items-center gap-1 transition"
+                >
+                  <span>Register on api.deriv.com</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-mono text-slate-400 block">
+                  Enter the App ID registered for <code className="text-amber-300 bg-slate-950 px-1 py-0.5 rounded">{window.location.origin}/callback</code>:
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 68924 (or leave default 1089)"
+                  value={inputAppId}
+                  onChange={(e) => setInputAppId(e.target.value)}
+                  className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-red-500 transition"
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed font-mono">
+                💡 When registering on <strong className="text-slate-200">api.deriv.com/apps/manage</strong>, set Redirect URL to: <code className="text-cyan-300 bg-slate-950 px-1.5 py-0.5 rounded">{window.location.origin}/callback</code>.
+              </p>
+            </div>
+
+            {/* OAuth Login CTA */}
+            <button
+              onClick={handleOAuthLogin}
+              disabled={isLoading}
+              className="w-full py-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-red-950/60 flex items-center justify-center gap-3 transition transform active:scale-95 cursor-pointer"
+            >
+              <ExternalLink className="w-4 h-4" />
+              <span>{isLoading ? 'Redirecting to Deriv...' : 'Log in with Deriv Account in Browser'}</span>
+            </button>
+
+            <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono pt-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Uses official Deriv OAuth session. You will be redirected back automatically.</span>
+            </div>
+          </div>
+        )}
+
+        {/* --- TAB 2: API TOKEN --- */}
         {activeTab === 'TOKEN' && (
           <form onSubmit={handleTokenLogin} className="space-y-5 relative z-10 animate-in fade-in duration-200">
-            {/* Step-by-step Helper Box */}
             <div className="bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-950 border border-cyan-500/30 rounded-2xl p-4.5 space-y-3">
               <div className="flex items-center justify-between text-xs text-cyan-300 font-bold font-mono">
                 <span className="flex items-center gap-1.5">
                   <Info className="w-4 h-4 text-cyan-400" />
-                  How to get your Deriv API Token (Takes 10 seconds):
+                  Instant Token Login:
                 </span>
                 <a
                   href="https://app.deriv.com/account/api-token"
@@ -232,14 +286,13 @@ export const LoginPage: React.FC = () => {
                 </a>
               </div>
 
-              <ol className="text-xs text-slate-300 space-y-1.5 list-decimal list-inside font-mono">
-                <li>Go to your Deriv account &gt; <strong>Settings &gt; API Token</strong></li>
+              <ol className="text-xs text-slate-300 space-y-1 list-decimal list-inside font-mono">
+                <li>Go to Deriv &gt; <strong>Settings &gt; API Token</strong></li>
                 <li>Check <strong>Read</strong> and <strong>Trade</strong> permissions</li>
-                <li>Click <strong>Create</strong>, copy the generated token, and paste it below</li>
+                <li>Click <strong>Create</strong>, copy the token, and paste it below</li>
               </ol>
             </div>
 
-            {/* Token Input */}
             <div className="space-y-1.5">
               <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider block">
                 Deriv API Token
@@ -248,7 +301,7 @@ export const LoginPage: React.FC = () => {
                 <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
                 <input
                   type="password"
-                  placeholder="e.g. a1-XyZ987654321..."
+                  placeholder="Paste token here (e.g. a1-XyZ987654321...)"
                   value={inputToken}
                   onChange={(e) => setInputToken(e.target.value)}
                   className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl pl-10 pr-4 py-3 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 ring-1 focus:ring-cyan-500/20 transition"
@@ -256,23 +309,6 @@ export const LoginPage: React.FC = () => {
               </div>
             </div>
 
-            {/* App ID Input */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <label className="font-mono font-bold text-slate-300 uppercase tracking-wider">
-                  Deriv App ID
-                </label>
-                <span className="text-[11px] font-mono text-slate-500">Default: 1089 (Deriv Public Websocket)</span>
-              </div>
-              <input
-                type="text"
-                value={inputAppId}
-                onChange={(e) => setInputAppId(e.target.value)}
-                className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-cyan-500 transition"
-              />
-            </div>
-
-            {/* Remember Session Checkbox */}
             <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300">
               <input
                 type="checkbox"
@@ -290,7 +326,6 @@ export const LoginPage: React.FC = () => {
               </div>
             </label>
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={isLoading}
@@ -302,7 +337,7 @@ export const LoginPage: React.FC = () => {
           </form>
         )}
 
-        {/* --- TAB 2: INSTANT SANDBOX DEMO (1-CLICK TEST) --- */}
+        {/* --- TAB 3: INSTANT SANDBOX DEMO --- */}
         {activeTab === 'DEMO_SANDBOX' && (
           <div className="space-y-5 relative z-10 animate-in fade-in duration-200">
             <div className="bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-950 border border-emerald-500/30 rounded-2xl p-5 space-y-3">
@@ -327,44 +362,6 @@ export const LoginPage: React.FC = () => {
             >
               <Play className="w-4 h-4" />
               <span>{isLoading ? 'Connecting Live Stream...' : 'Launch Instant Live Sandbox'}</span>
-            </button>
-          </div>
-        )}
-
-        {/* --- TAB 3: DERIV OAUTH (EXPLAINING LOCALHOST REDIRECTS) --- */}
-        {activeTab === 'OAUTH' && (
-          <div className="space-y-5 relative z-10 animate-in fade-in duration-200">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-3">
-              <div className="flex items-center gap-2 text-slate-200 font-bold text-sm">
-                <Globe className="w-4 h-4 text-red-500" />
-                <span>Why Deriv OAuth requires a registered domain:</span>
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Deriv’s official OAuth security policy blocks redirecting to generic <code className="text-amber-400 bg-slate-950 px-1 py-0.5 rounded">http://localhost:5173</code> unless you register your own free custom App ID on{' '}
-                <a
-                  href="https://api.deriv.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-cyan-400 underline"
-                >
-                  api.deriv.com
-                </a>{' '}
-                and whitelist your localhost or tunnel URL.
-              </p>
-
-              <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl text-[11px] font-mono text-slate-300 space-y-1">
-                <div className="text-cyan-300 font-bold">Recommended for Localhost:</div>
-                <div>Use the <strong>API Token tab</strong> above to log in instantly without domain restrictions!</div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleOAuthLogin}
-              disabled={isLoading}
-              className="w-full py-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-red-950/60 flex items-center justify-center gap-3 transition transform active:scale-95 cursor-pointer"
-            >
-              <ExternalLink className="w-4 h-4" />
-              <span>{isLoading ? 'Authorizing...' : 'Try Deriv OAuth Portal'}</span>
             </button>
           </div>
         )}
