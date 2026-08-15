@@ -8,91 +8,93 @@ export interface OAuthAccount {
 export const REGISTERED_APP_ID = '347FrwAYb8ptoUsbiGVsA';
 
 /**
- * Generates a random PKCE code verifier string (43-128 characters).
+ * Generates a random PKCE code verifier string (43-128 characters) per Deriv OAuth2 docs.
  */
 export function generateCodeVerifier(): string {
+  const array = crypto.getRandomValues(new Uint8Array(64));
   const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-  const array = new Uint8Array(64);
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(array);
-  } else {
-    for (let i = 0; i < 64; i++) {
-      array[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  let result = '';
-  for (let i = 0; i < array.length; i++) {
-    result += charset[array[i] % charset.length];
-  }
-  return result;
+  return Array.from(array)
+    .map((v) => charset[v % charset.length])
+    .join('');
 }
 
 /**
- * Generates a base64url-encoded SHA-256 code challenge from a code verifier.
+ * Generates a base64url-encoded SHA-256 code challenge from a code verifier per Deriv OAuth2 docs.
  */
 export async function generateCodeChallenge(verifier: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(verifier);
 
   if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
-    const digest = await crypto.subtle.digest('SHA-256', data);
-    const bytes = new Uint8Array(digest);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary)
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
   }
 
-  // Fallback
   return verifier;
 }
 
 /**
- * Constructs the official Deriv OAuth redirect URL for browser authentication with PKCE & State.
- * Does not force unpermitted scope parameters so Deriv uses the registered scopes on the App ID.
+ * Generates a random state string for CSRF protection per Deriv OAuth2 docs.
+ */
+export function generateRandomState(): string {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+  }
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+/**
+ * Constructs the official Deriv OAuth 2.0 Authorization URL per developers.deriv.com/docs/intro/oauth/
  */
 export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promise<string> {
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
   const effectiveAppId = (appId || (import.meta as any).env?.VITE_DERIV_APP_ID || REGISTERED_APP_ID).trim();
 
-  // 1. Generate Secure Random State (at least 8 characters)
-  let state = '';
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    state = crypto.randomUUID();
-  } else {
-    state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  }
+  // 1. Generate & Store Random State
+  const state = generateRandomState();
   sessionStorage.setItem('oauth_state', state);
 
-  // 2. Generate PKCE Code Verifier & Challenge
+  // 2. Generate & Store PKCE Code Verifier & Challenge
   const codeVerifier = generateCodeVerifier();
   sessionStorage.setItem('oauth_code_verifier', codeVerifier);
+  sessionStorage.setItem('pkce_code_verifier', codeVerifier);
   const codeChallenge = await generateCodeChallenge(codeVerifier);
 
   const isAlphanumeric = /[a-zA-Z]/.test(effectiveAppId);
 
   if (isAlphanumeric) {
-    return `https://auth.deriv.com/oauth2/auth?client_id=${effectiveAppId}&response_type=code&redirect_uri=${encodeURIComponent(
-      redirectUri
-    )}&state=${encodeURIComponent(state)}&code_challenge=${encodeURIComponent(
-      codeChallenge
-    )}&code_challenge_method=S256`;
+    // Official Deriv OAuth 2.0 Authorization Code Flow with PKCE
+    return (
+      `https://auth.deriv.com/oauth2/auth` +
+      `?response_type=code` +
+      `&client_id=${encodeURIComponent(effectiveAppId)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=${encodeURIComponent('trade account_manage')}` +
+      `&state=${encodeURIComponent(state)}` +
+      `&code_challenge=${encodeURIComponent(codeChallenge)}` +
+      `&code_challenge_method=S256`
+    );
   }
 
-  // Otherwise use legacy numeric app_id endpoint
-  return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
-    redirectUri
-  )}&state=${encodeURIComponent(state)}`;
+  // Legacy numeric app_id endpoint
+  return (
+    `https://oauth.deriv.com/oauth2/authorize` +
+    `?app_id=${encodeURIComponent(effectiveAppId)}` +
+    `&l=en` +
+    `&brand=deriv` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&state=${encodeURIComponent(state)}`
+  );
 }
 
 /**
  * Exchanges OAuth2 authorization code via serverless backend route (/api/oauth-token)
- * or fallback direct to https://auth.deriv.com/oauth2/token with PKCE code_verifier
+ * or direct to https://auth.deriv.com/oauth2/token with PKCE code_verifier per docs.
  */
 export async function exchangeOAuthCodeForTokens(
   code: string,
@@ -104,7 +106,7 @@ export async function exchangeOAuthCodeForTokens(
 
   let data: any = null;
 
-  // 1. Try Vercel Serverless Function first (keeps secrets and token exchange server-side)
+  // 1. Try Vercel Serverless Function first
   try {
     const serverRes = await fetch('/api/oauth-token', {
       method: 'POST',
@@ -186,12 +188,10 @@ export async function exchangeOAuthCodeForTokens(
 
 /**
  * Robustly parses incoming tokens from URL search params, hash fragments, or full href.
- * Handles both multi-account responses (acct1/token1, acct2/token2) and single token parameters (token, access_token).
  */
 export function parseOAuthResponse(params: URLSearchParams): OAuthAccount[] {
   const accounts: OAuthAccount[] = [];
 
-  // 1. Try standard Deriv multi-account pattern: acct1 & token1, acct2 & token2...
   let index = 1;
   while (params.has(`token${index}`) || params.has(`acct${index}`)) {
     const token = params.get(`token${index}`) || '';
@@ -210,7 +210,6 @@ export function parseOAuthResponse(params: URLSearchParams): OAuthAccount[] {
     index++;
   }
 
-  // 2. Fallback: check single token parameters (token, access_token, auth_token)
   if (accounts.length === 0) {
     const singleToken =
       params.get('token') ||
