@@ -4,14 +4,20 @@ import { extractLastDigit } from './analysisEngine';
 type ConnectionStateListener = (state: ConnectionState) => void;
 type TickListener = (tick: TickData) => void;
 
+interface PendingRequest {
+  payload: Record<string, any>;
+  resolve: (val: any) => void;
+  reject: (err: any) => void;
+}
+
 class DerivSocketService {
   private ws: WebSocket | null = null;
-  private appId: string = '1089'; // Public numeric App ID for streaming live WebSocket tick data
+  private appId: string = '1089'; // Numeric public App ID for Deriv WebSocket feed
   private token: string | null = null;
   private connectionState: ConnectionState = 'disconnected';
   private pingIntervalId: any = null;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 10;
+  private maxReconnectAttempts: number = 15;
   private reconnectTimeoutId: any = null;
 
   // Primary and fallback WebSocket Gateways
@@ -22,9 +28,12 @@ class DerivSocketService {
   ];
   private currentEndpointIndex: number = 0;
 
-  // Active subscriptions tracking
-  private activeTickSubscriptions: Set<string> = new Set();
+  // Active subscriptions tracking (symbol -> boolean)
+  private subscribedSymbols: Set<string> = new Set();
   private subscriptionIdMap: Map<string, string> = new Map(); // symbol -> subscriptionId
+
+  // Queue for messages sent while socket is connecting or offline
+  private messageQueue: PendingRequest[] = [];
 
   // Callbacks & listeners
   private stateListeners: Set<ConnectionStateListener> = new Set();
@@ -33,11 +42,11 @@ class DerivSocketService {
   private reqIdCounter: number = 1;
 
   constructor() {
-    // Singleton instance initialization
+    // Singleton instance
   }
 
   public setAppId(appId: string) {
-    if (this.appId !== appId) {
+    if (appId && /^\d+$/.test(appId) && this.appId !== appId) {
       this.appId = appId;
       if (this.connectionState === 'connected') {
         this.reconnect();
@@ -47,11 +56,6 @@ class DerivSocketService {
 
   public setToken(token: string | null) {
     this.token = token ? token.trim() : null;
-    if (this.connectionState === 'connected' && this.token) {
-      if (!this.token.startsWith('ory_at_') && this.token.length < 50) {
-        this.authorize(this.token);
-      }
-    }
   }
 
   public connect(appId?: string): Promise<void> {
@@ -59,66 +63,89 @@ class DerivSocketService {
       this.appId = appId;
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         resolve();
         return;
       }
 
       if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
-        const checkOpen = () => {
+        // Wait until OPEN or CLOSED
+        const checkReady = () => {
           if (this.ws?.readyState === WebSocket.OPEN) {
             resolve();
-          } else if (this.ws?.readyState === WebSocket.CLOSED) {
-            reject(new Error('Socket connection failed'));
+          } else if (!this.ws || this.ws.readyState === WebSocket.CLOSED || this.ws.readyState === WebSocket.CLOSING) {
+            this.initSocket(resolve);
           } else {
-            setTimeout(checkOpen, 50);
+            setTimeout(checkReady, 50);
           }
         };
-        checkOpen();
+        setTimeout(checkReady, 50);
         return;
       }
 
-      this.updateState('connecting');
-      const baseEndpoint = this.endpoints[this.currentEndpointIndex % this.endpoints.length];
-      const numericAppId = /^\d+$/.test(this.appId) ? this.appId : '1089';
-      const url = `${baseEndpoint}?app_id=${numericAppId}&l=en&brand=deriv`;
+      this.initSocket(resolve);
+    });
+  }
 
-      try {
-        this.ws = new WebSocket(url);
+  private initSocket(onOpenCallback?: () => void) {
+    this.updateState('connecting');
+    const baseEndpoint = this.endpoints[this.currentEndpointIndex % this.endpoints.length];
+    const numericAppId = /^\d+$/.test(this.appId) ? this.appId : '1089';
+    const url = `${baseEndpoint}?app_id=${numericAppId}&l=en&brand=deriv`;
 
-        this.ws.onopen = () => {
-          this.updateState('connected');
-          this.reconnectAttempts = 0;
-          this.startPing();
+    try {
+      if (this.ws) {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onerror = null;
+        this.ws.onclose = null;
+        try {
+          this.ws.close();
+        } catch (e) {
+          // ignore
+        }
+      }
 
-          // Resubscribe to all active tick symbols
-          this.resubscribeActiveSymbols();
-          resolve();
-        };
+      this.ws = new WebSocket(url);
 
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
+      this.ws.onopen = () => {
+        this.updateState('connected');
+        this.reconnectAttempts = 0;
+        this.startPing();
 
-        this.ws.onerror = (error) => {
-          console.warn(`[DerivSocket] Error on endpoint ${baseEndpoint}:`, error);
-          this.currentEndpointIndex++;
-          this.updateState('error');
-          reject(error);
-        };
+        // 1. Flush queued messages
+        this.flushQueue();
 
-        this.ws.onclose = () => {
-          this.updateState('disconnected');
-          this.stopPing();
-          this.scheduleReconnect();
-        };
-      } catch (err) {
+        // 2. Re-subscribe to all active symbols
+        this.resubscribeActiveSymbols();
+
+        if (onOpenCallback) {
+          onOpenCallback();
+        }
+      };
+
+      this.ws.onmessage = (event) => {
+        this.handleMessage(event.data);
+      };
+
+      this.ws.onerror = (error) => {
+        console.warn(`[DerivSocket] Error on endpoint ${baseEndpoint}:`, error);
         this.currentEndpointIndex++;
         this.updateState('error');
-        reject(err);
-      }
-    });
+      };
+
+      this.ws.onclose = () => {
+        this.updateState('disconnected');
+        this.stopPing();
+        this.scheduleReconnect();
+      };
+    } catch (err) {
+      console.error('[DerivSocket] Failed to create WebSocket:', err);
+      this.currentEndpointIndex++;
+      this.updateState('error');
+      this.scheduleReconnect();
+    }
   }
 
   public disconnect() {
@@ -127,6 +154,7 @@ class DerivSocketService {
     if (this.ws) {
       this.ws.onclose = null;
       this.ws.close();
+      this.ws = null;
     }
     this.updateState('disconnected');
   }
@@ -147,17 +175,19 @@ class DerivSocketService {
     return () => this.tickListeners.delete(listener);
   }
 
+  /**
+   * Safely sends a request. If socket is connecting or disconnected, queues it and executes immediately upon connection.
+   */
   public sendRequest<T = any>(requestData: Record<string, any>): Promise<T> {
     return new Promise((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        this.connect()
-          .then(() => {
-            this.executeSend(requestData, resolve, reject);
-          })
-          .catch(reject);
-        return;
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.executeSend(requestData, resolve, reject);
+      } else {
+        this.messageQueue.push({ payload: requestData, resolve, reject });
+        if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+          this.connect();
+        }
       }
-      this.executeSend(requestData, resolve, reject);
     });
   }
 
@@ -166,16 +196,31 @@ class DerivSocketService {
     resolve: (val: any) => void,
     reject: (err: any) => void
   ) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.messageQueue.push({ payload: requestData, resolve, reject });
+      return;
+    }
+
     const reqId = this.reqIdCounter++;
     const payload = { ...requestData, req_id: reqId };
 
     this.reqCallbacks.set(reqId, { resolve, reject });
 
     try {
-      this.ws?.send(JSON.stringify(payload));
+      this.ws.send(JSON.stringify(payload));
     } catch (err) {
       this.reqCallbacks.delete(reqId);
       reject(err);
+    }
+  }
+
+  private flushQueue() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const queueToProcess = [...this.messageQueue];
+    this.messageQueue = [];
+
+    for (const item of queueToProcess) {
+      this.executeSend(item.payload, item.resolve, item.reject);
     }
   }
 
@@ -215,7 +260,13 @@ class DerivSocketService {
             this.subscriptionIdMap.set(rawTick.symbol, data.subscription.id);
           }
 
-          this.tickListeners.forEach((listener) => listener(tick));
+          this.tickListeners.forEach((listener) => {
+            try {
+              listener(tick);
+            } catch (err) {
+              console.error('[DerivSocket] Error in tick listener:', err);
+            }
+          });
         }
       }
 
@@ -238,7 +289,13 @@ class DerivSocketService {
               epoch,
               pipSize,
             };
-            this.tickListeners.forEach((listener) => listener(tick));
+            this.tickListeners.forEach((listener) => {
+              try {
+                listener(tick);
+              } catch (err) {
+                // ignore
+              }
+            });
           }
         }
       }
@@ -247,11 +304,11 @@ class DerivSocketService {
     }
   }
 
-  // --- DERIV SPECIFIC API HELPERS ---
+  // --- DERIV API HELPERS ---
 
   public async authorize(token: string) {
     if (!token || typeof token !== 'string' || !token.trim()) {
-      return { error: { message: 'Invalid token: token cannot be empty.' } };
+      return { error: { message: 'Invalid token.' } };
     }
     const cleanToken = token.trim();
     this.token = cleanToken;
@@ -277,66 +334,72 @@ class DerivSocketService {
           pipSize: item.pip_size ?? 2,
         }));
     } catch (e) {
-      console.warn('[DerivSocket] getActiveSymbols error, using defaults:', e);
+      console.warn('[DerivSocket] getActiveSymbols fallback:', e);
       return [];
     }
   }
 
-  public async subscribeTicks(symbol: string, historyCount: number = 200) {
-    if (this.activeTickSubscriptions.has(symbol)) return;
-    this.activeTickSubscriptions.add(symbol);
+  public subscribeTicks(symbol: string, historyCount: number = 100) {
+    this.subscribedSymbols.add(symbol);
 
-    // 1. Fetch initial tick history for immediate charts & frequencies
-    try {
-      this.sendRequest({
-        ticks_history: symbol,
-        count: historyCount,
-        end: 'latest',
-        style: 'ticks',
-      }).catch((err) => console.warn(`[DerivSocket] History error for ${symbol}:`, err));
-    } catch (e) {
-      // ignore
-    }
+    // 1. Fetch initial tick history for immediate charts
+    this.sendRequest({
+      ticks_history: symbol,
+      count: historyCount,
+      end: 'latest',
+      style: 'ticks',
+    }).catch(() => {});
 
-    // 2. Subscribe to continuous live stream
-    try {
-      const res = await this.sendRequest({
-        ticks: symbol,
-        subscribe: 1,
+    // 2. Subscribe to live stream
+    this.sendRequest({
+      ticks: symbol,
+      subscribe: 1,
+    })
+      .then((res) => {
+        if (res.subscription?.id) {
+          this.subscriptionIdMap.set(symbol, res.subscription.id);
+        }
+      })
+      .catch((err) => {
+        console.warn(`[DerivSocket] Ticks subscription notice for ${symbol}:`, err);
       });
-
-      if (res.subscription?.id) {
-        this.subscriptionIdMap.set(symbol, res.subscription.id);
-      }
-    } catch (e) {
-      console.error(`[DerivSocket] Ticks subscription failed for ${symbol}:`, e);
-    }
   }
 
-  public async unsubscribeTicks(symbol: string) {
-    this.activeTickSubscriptions.delete(symbol);
+  public unsubscribeTicks(symbol: string) {
+    this.subscribedSymbols.delete(symbol);
     const subId = this.subscriptionIdMap.get(symbol);
     if (subId) {
-      try {
-        await this.sendRequest({ forget: subId });
-      } catch (e) {
-        // ignore
-      }
+      this.sendRequest({ forget: subId }).catch(() => {});
       this.subscriptionIdMap.delete(symbol);
     }
   }
 
   private resubscribeActiveSymbols() {
-    const symbolsToResubscribe = Array.from(this.activeTickSubscriptions);
-    this.activeTickSubscriptions.clear();
-    for (const sym of symbolsToResubscribe) {
-      this.subscribeTicks(sym);
+    const symbols = Array.from(this.subscribedSymbols);
+    for (const sym of symbols) {
+      // Re-send ticks subscription on reconnect
+      this.sendRequest({
+        ticks: sym,
+        subscribe: 1,
+      })
+        .then((res) => {
+          if (res.subscription?.id) {
+            this.subscriptionIdMap.set(sym, res.subscription.id);
+          }
+        })
+        .catch(() => {});
     }
   }
 
   private updateState(state: ConnectionState) {
     this.connectionState = state;
-    this.stateListeners.forEach((listener) => listener(state));
+    this.stateListeners.forEach((listener) => {
+      try {
+        listener(state);
+      } catch (err) {
+        // ignore
+      }
+    });
   }
 
   private startPing() {
@@ -345,7 +408,7 @@ class DerivSocketService {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ ping: 1 }));
       }
-    }, 25000);
+    }, 20000);
   }
 
   private stopPing() {
@@ -357,10 +420,10 @@ class DerivSocketService {
 
   private scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[DerivSocket] Max reconnect attempts reached.');
-      return;
+      console.warn('[DerivSocket] Retrying connection...');
+      this.reconnectAttempts = 0;
     }
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000);
+    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 8000);
     this.reconnectAttempts++;
     this.currentEndpointIndex++;
     this.reconnectTimeoutId = setTimeout(() => {

@@ -15,9 +15,9 @@ interface MarketState {
   setConnectionState: (state: ConnectionState) => void;
   loadActiveSymbols: () => Promise<void>;
   setSelectedSymbol: (symbol: string) => void;
-  subscribeSymbol: (symbol: string) => Promise<void>;
-  subscribeAllVisible: (symbols: string[]) => Promise<void>;
-  unsubscribeSymbol: (symbol: string) => Promise<void>;
+  subscribeSymbol: (symbol: string) => void;
+  subscribeAllVisible: (symbols: string[]) => void;
+  unsubscribeSymbol: (symbol: string) => void;
   getBuffer: (symbol: string) => RingBuffer<TickData>;
 }
 
@@ -59,7 +59,7 @@ export const useMarketStore = create<MarketState>((set, get) => {
     set({ connectionState });
   });
 
-  // Listen for tick updates from DerivSocketService
+  // Listen for real-time tick updates
   derivSocket.onTick((tick: TickData) => {
     const { ringBuffers, latestTicks } = get();
     let buffer = ringBuffers[tick.symbol];
@@ -77,7 +77,7 @@ export const useMarketStore = create<MarketState>((set, get) => {
       },
       latestTicks: {
         ...latestTicks,
-        [tick.symbol]: tick,
+        [tick.symbol]: { ...tick },
       },
     });
   });
@@ -99,7 +99,6 @@ export const useMarketStore = create<MarketState>((set, get) => {
         await derivSocket.connect();
         const symbols = await derivSocket.getActiveSymbols();
         if (symbols && symbols.length > 0) {
-          // Merge API symbols with verified list to ensure full coverage
           const existingMap = new Map(VERIFIED_DERIV_SYNTHETICS.map((s) => [s.symbol, s]));
           for (const s of symbols) {
             existingMap.set(s.symbol, s);
@@ -107,7 +106,7 @@ export const useMarketStore = create<MarketState>((set, get) => {
           set({ activeSymbols: Array.from(existingMap.values()) });
         }
       } catch (err) {
-        console.warn('[MarketStore] Using verified synthetic indices fallback:', err);
+        console.warn('[MarketStore] Active symbols notice:', err);
       } finally {
         set({ isInitializing: false });
       }
@@ -118,15 +117,15 @@ export const useMarketStore = create<MarketState>((set, get) => {
       get().subscribeSymbol(selectedSymbol);
     },
 
-    subscribeSymbol: async (symbol: string) => {
+    subscribeSymbol: (symbol: string) => {
       const { subscribedSymbols } = get();
       if (!subscribedSymbols.includes(symbol)) {
         set({ subscribedSymbols: [...subscribedSymbols, symbol] });
       }
-      await derivSocket.subscribeTicks(symbol, 200);
+      derivSocket.subscribeTicks(symbol, 200);
     },
 
-    subscribeAllVisible: async (symbols: string[]) => {
+    subscribeAllVisible: (symbols: string[]) => {
       const { subscribedSymbols } = get();
       const newSymbols = symbols.filter((s) => !subscribedSymbols.includes(s));
       if (newSymbols.length > 0) {
@@ -137,8 +136,8 @@ export const useMarketStore = create<MarketState>((set, get) => {
       }
     },
 
-    unsubscribeSymbol: async (symbol: string) => {
-      await derivSocket.unsubscribeTicks(symbol);
+    unsubscribeSymbol: (symbol: string) => {
+      derivSocket.unsubscribeTicks(symbol);
       set((state) => ({
         subscribedSymbols: state.subscribedSymbols.filter((s) => s !== symbol),
       }));
