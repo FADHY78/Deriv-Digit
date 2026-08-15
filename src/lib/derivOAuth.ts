@@ -9,7 +9,7 @@ export const REGISTERED_APP_ID = '347FrwAYb8ptoUsbiGVsA';
 
 /**
  * Constructs the official Deriv OAuth redirect URL for browser authentication.
- * Uses response_type=code for OAuth2 compliance with auth.deriv.com.
+ * Follows exact format: https://auth.deriv.com/oauth2/auth?client_id=YOUR_APP_ID&response_type=code&redirect_uri=...
  */
 export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
   const currentOrigin = window.location.origin;
@@ -20,19 +20,20 @@ export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
   const isAlphanumeric = /[a-zA-Z]/.test(effectiveAppId);
 
   if (isAlphanumeric) {
-    return `https://auth.deriv.com/oauth2/auth?client_id=${effectiveAppId}&redirect_uri=${encodeURIComponent(
+    return `https://auth.deriv.com/oauth2/auth?client_id=${effectiveAppId}&response_type=code&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&response_type=code`;
+    )}`;
   }
 
-  // Otherwise use numeric app_id endpoint
+  // Otherwise use legacy numeric app_id endpoint
   return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
   )}`;
 }
 
 /**
- * Exchanges OAuth2 authorization code with Deriv auth server at https://auth.deriv.com/oauth2/token
+ * Exchanges OAuth2 authorization code via serverless backend route (/api/oauth-token)
+ * or fallback direct to https://auth.deriv.com/oauth2/token
  */
 export async function exchangeOAuthCodeForTokens(
   code: string,
@@ -41,30 +42,56 @@ export async function exchangeOAuthCodeForTokens(
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
 
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    client_id: clientId,
-    code: code,
-    redirect_uri: redirectUri,
-  });
+  let data: any = null;
 
-  const response = await fetch('https://auth.deriv.com/oauth2/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: body.toString(),
-  });
+  // 1. Try Vercel Serverless Function first (keeps secrets and token exchange server-side)
+  try {
+    const serverRes = await fetch('/api/oauth-token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code,
+        clientId,
+        redirectUri,
+      }),
+    });
 
-  const data = await response.json();
+    if (serverRes.ok) {
+      data = await serverRes.json();
+    }
+  } catch (serverErr) {
+    console.warn('[OAuth] Serverless exchange attempt error, trying fallback:', serverErr);
+  }
 
-  if (!response.ok || data.error) {
-    throw new Error(
-      data.error_description ||
-      data.error ||
-      data.message ||
-      'Failed to exchange authorization code for access tokens'
-    );
+  // 2. Direct client fallback if serverless route not found
+  if (!data) {
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      code: code,
+      redirect_uri: redirectUri,
+    });
+
+    const response = await fetch('https://auth.deriv.com/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+
+    data = await response.json();
+
+    if (!response.ok || data.error) {
+      throw new Error(
+        data.error_description ||
+        data.error ||
+        data.message ||
+        'Failed to exchange authorization code for access tokens'
+      );
+    }
   }
 
   const accounts: OAuthAccount[] = [];
