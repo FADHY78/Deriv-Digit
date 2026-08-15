@@ -6,7 +6,7 @@ type TickListener = (tick: TickData) => void;
 
 class DerivSocketService {
   private ws: WebSocket | null = null;
-  private appId: string = '1089'; // Default public numeric App ID for WebSocket feed
+  private appId: string = '1089'; // Public numeric App ID for streaming live WebSocket tick data
   private token: string | null = null;
   private connectionState: ConnectionState = 'disconnected';
   private pingIntervalId: any = null;
@@ -14,7 +14,7 @@ class DerivSocketService {
   private maxReconnectAttempts: number = 10;
   private reconnectTimeoutId: any = null;
 
-  // Fallback WebSocket Endpoints
+  // Primary and fallback WebSocket Gateways
   private endpoints: string[] = [
     'wss://ws.derivws.com/websockets/v3',
     'wss://frontend.binaryws.com/websockets/v3',
@@ -48,23 +48,39 @@ class DerivSocketService {
   public setToken(token: string | null) {
     this.token = token ? token.trim() : null;
     if (this.connectionState === 'connected' && this.token) {
-      this.authorize(this.token);
+      if (!this.token.startsWith('ory_at_') && this.token.length < 50) {
+        this.authorize(this.token);
+      }
     }
   }
 
   public connect(appId?: string): Promise<void> {
-    if (appId) this.appId = appId;
+    if (appId && /^\d+$/.test(appId)) {
+      this.appId = appId;
+    }
 
     return new Promise((resolve, reject) => {
-      if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         resolve();
+        return;
+      }
+
+      if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+        const checkOpen = () => {
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            resolve();
+          } else if (this.ws?.readyState === WebSocket.CLOSED) {
+            reject(new Error('Socket connection failed'));
+          } else {
+            setTimeout(checkOpen, 50);
+          }
+        };
+        checkOpen();
         return;
       }
 
       this.updateState('connecting');
       const baseEndpoint = this.endpoints[this.currentEndpointIndex % this.endpoints.length];
-
-      // WebSocket URL requires a numeric app_id (fallback to 1089 if alphanumeric OAuth client_id was passed)
       const numericAppId = /^\d+$/.test(this.appId) ? this.appId : '1089';
       const url = `${baseEndpoint}?app_id=${numericAppId}&l=en&brand=deriv`;
 
@@ -76,12 +92,7 @@ class DerivSocketService {
           this.reconnectAttempts = 0;
           this.startPing();
 
-          // Re-authorize if token exists
-          if (this.token) {
-            this.authorize(this.token);
-          }
-
-          // Re-subscribe to previously active tick symbols
+          // Resubscribe to all active tick symbols
           this.resubscribeActiveSymbols();
           resolve();
         };
@@ -92,7 +103,7 @@ class DerivSocketService {
 
         this.ws.onerror = (error) => {
           console.warn(`[DerivSocket] Error on endpoint ${baseEndpoint}:`, error);
-          this.currentEndpointIndex++; // Try next fallback on error
+          this.currentEndpointIndex++;
           this.updateState('error');
           reject(error);
         };
@@ -139,9 +150,11 @@ class DerivSocketService {
   public sendRequest<T = any>(requestData: Record<string, any>): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        this.connect().then(() => {
-          this.executeSend(requestData, resolve, reject);
-        }).catch(reject);
+        this.connect()
+          .then(() => {
+            this.executeSend(requestData, resolve, reject);
+          })
+          .catch(reject);
         return;
       }
       this.executeSend(requestData, resolve, reject);
@@ -182,40 +195,41 @@ class DerivSocketService {
         }
       }
 
-      // 2. Handle incoming tick streams
-      if (data.msg_type === 'tick' && data.tick) {
+      // 2. Handle incoming tick streams (msg_type: 'tick' or data.tick)
+      if (data.tick || data.msg_type === 'tick') {
         const rawTick = data.tick;
-        const pipSize = rawTick.pip_size ?? 2;
-        const lastDigit = extractLastDigit(rawTick.quote, pipSize);
+        if (rawTick && typeof rawTick.quote === 'number') {
+          const pipSize = rawTick.pip_size ?? 2;
+          const lastDigit = extractLastDigit(rawTick.quote, pipSize);
 
-        const tick: TickData = {
-          symbol: rawTick.symbol,
-          quote: rawTick.quote,
-          lastDigit,
-          epoch: rawTick.epoch,
-          id: rawTick.id,
-          pipSize,
-        };
+          const tick: TickData = {
+            symbol: rawTick.symbol,
+            quote: rawTick.quote,
+            lastDigit,
+            epoch: rawTick.epoch,
+            id: rawTick.id,
+            pipSize,
+          };
 
-        // Track subscription ID if present
-        if (data.subscription?.id) {
-          this.subscriptionIdMap.set(rawTick.symbol, data.subscription.id);
+          if (data.subscription?.id) {
+            this.subscriptionIdMap.set(rawTick.symbol, data.subscription.id);
+          }
+
+          this.tickListeners.forEach((listener) => listener(tick));
         }
-
-        this.tickListeners.forEach((listener) => listener(tick));
       }
 
-      // 3. Handle ticks history responses
+      // 3. Handle ticks history responses (msg_type: 'history')
       if (data.msg_type === 'history' && data.history) {
         const times = data.history.times || [];
         const prices = data.history.prices || [];
         const symbol = data.echo_req?.ticks_history;
         const pipSize = data.pip_size || 2;
 
-        if (symbol) {
+        if (symbol && times.length > 0) {
           for (let i = 0; i < times.length; i++) {
-            const quote = prices[i];
-            const epoch = times[i];
+            const quote = Number(prices[i]);
+            const epoch = Number(times[i]);
             const lastDigit = extractLastDigit(quote, pipSize);
             const tick: TickData = {
               symbol,
@@ -228,7 +242,6 @@ class DerivSocketService {
           }
         }
       }
-
     } catch (err) {
       console.error('[DerivSocket] Error handling message:', err);
     }
@@ -246,49 +259,46 @@ class DerivSocketService {
   }
 
   public async getActiveSymbols(): Promise<SyntheticSymbol[]> {
-    const res = await this.sendRequest({
-      active_symbols: 'brief',
-      product_type: 'basic',
-    });
+    try {
+      const res = await this.sendRequest({
+        active_symbols: 'brief',
+        product_type: 'basic',
+      });
 
-    if (!res.active_symbols) return [];
+      if (!res.active_symbols) return [];
 
-    // Filter synthetic / volatility indices
-    return res.active_symbols
-      .filter((item: any) => item.market === 'synthetic_index' || item.submarket.includes('synth'))
-      .map((item: any) => ({
-        symbol: item.symbol,
-        displayName: item.display_name,
-        market: item.market,
-        submarket: item.submarket,
-        pipSize: item.pip_size ?? 2,
-      }));
+      return res.active_symbols
+        .filter((item: any) => item.market === 'synthetic_index' || (item.submarket && item.submarket.includes('synth')) || item.symbol.startsWith('R_') || item.symbol.startsWith('1HZ') || item.symbol.startsWith('BOOM') || item.symbol.startsWith('CRASH'))
+        .map((item: any) => ({
+          symbol: item.symbol,
+          displayName: item.display_name,
+          market: item.market || 'synthetic_index',
+          submarket: item.submarket || 'random_index',
+          pipSize: item.pip_size ?? 2,
+        }));
+    } catch (e) {
+      console.warn('[DerivSocket] getActiveSymbols error, using defaults:', e);
+      return [];
+    }
   }
 
-  public async subscribeTicks(symbol: string, historyCount: number = 500) {
+  public async subscribeTicks(symbol: string, historyCount: number = 200) {
     if (this.activeTickSubscriptions.has(symbol)) return;
-
-    // Enforce max 5 concurrent symbol subscriptions to protect performance
-    if (this.activeTickSubscriptions.size >= 5) {
-      const oldestSymbol = Array.from(this.activeTickSubscriptions)[0];
-      await this.unsubscribeTicks(oldestSymbol);
-    }
-
     this.activeTickSubscriptions.add(symbol);
 
-    // Fetch history first
+    // 1. Fetch initial tick history for immediate charts & frequencies
     try {
-      await this.sendRequest({
+      this.sendRequest({
         ticks_history: symbol,
         count: historyCount,
         end: 'latest',
         style: 'ticks',
-      });
+      }).catch((err) => console.warn(`[DerivSocket] History error for ${symbol}:`, err));
     } catch (e) {
-      console.warn(`[DerivSocket] History fetch warning for ${symbol}:`, e);
+      // ignore
     }
 
-    // Then subscribe live
+    // 2. Subscribe to continuous live stream
     try {
       const res = await this.sendRequest({
         ticks: symbol,
@@ -335,7 +345,7 @@ class DerivSocketService {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ ping: 1 }));
       }
-    }, 30000);
+    }, 25000);
   }
 
   private stopPing() {
@@ -350,9 +360,9 @@ class DerivSocketService {
       console.error('[DerivSocket] Max reconnect attempts reached.');
       return;
     }
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 15000);
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000);
     this.reconnectAttempts++;
-    this.currentEndpointIndex++; // Try alternate endpoint on reconnect
+    this.currentEndpointIndex++;
     this.reconnectTimeoutId = setTimeout(() => {
       this.connect();
     }, delay);

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Activity, RefreshCw, Search, Sparkles, Zap, Flame, Snowflake, Layers } from 'lucide-react';
 import { useMarketStore } from '../store/useMarketStore';
+import { useAuthStore } from '../store/useAuthStore';
 import { SymbolCard } from '../components/dashboard/SymbolCard';
 import { RiskBanner } from '../components/common/RiskBanner';
 
@@ -11,21 +12,21 @@ export const DashboardPage: React.FC = () => {
     ringBuffers,
     isInitializing,
     loadActiveSymbols,
-    subscribeSymbol,
+    subscribeAllVisible,
   } = useMarketStore();
+
+  const { fetchUserAccounts } = useAuthStore();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<'ALL' | 'VOL' | '1S' | 'CRASH_BOOM'>('ALL');
 
   useEffect(() => {
-    loadActiveSymbols();
+    // 1. Sync accounts & live balance
+    fetchUserAccounts();
 
-    // Subscribe to first 4 primary indices for dashboard live feed
-    const primarySymbols = ['R_100', '1HZ100V', 'R_75', 'R_50'];
-    for (const sym of primarySymbols) {
-      subscribeSymbol(sym);
-    }
-  }, [loadActiveSymbols, subscribeSymbol]);
+    // 2. Load symbols and connect WebSocket stream
+    loadActiveSymbols();
+  }, [loadActiveSymbols, fetchUserAccounts]);
 
   // Filter symbols based on search and category
   const filteredSymbols = useMemo(() => {
@@ -37,11 +38,19 @@ export const DashboardPage: React.FC = () => {
       if (!matchesSearch) return false;
 
       if (selectedCategory === '1S') return sym.symbol.includes('1HZ');
-      if (selectedCategory === 'CRASH_BOOM') return sym.symbol.includes('BOOM') || sym.symbol.includes('CRASH');
-      if (selectedCategory === 'VOL') return !sym.symbol.includes('1HZ') && !sym.symbol.includes('BOOM') && !sym.symbol.includes('CRASH');
+      if (selectedCategory === 'CRASH_BOOM') return sym.symbol.includes('BOOM') || sym.symbol.includes('CRASH') || sym.symbol.includes('JD') || sym.symbol.includes('stp');
+      if (selectedCategory === 'VOL') return !sym.symbol.includes('1HZ') && !sym.symbol.includes('BOOM') && !sym.symbol.includes('CRASH') && !sym.symbol.includes('JD') && !sym.symbol.includes('stp');
       return true;
     });
   }, [activeSymbols, searchQuery, selectedCategory]);
+
+  // Auto-subscribe to all displayed symbols so every card streams live data
+  useEffect(() => {
+    if (filteredSymbols.length > 0) {
+      const symbolsToSubscribe = filteredSymbols.map((s) => s.symbol);
+      subscribeAllVisible(symbolsToSubscribe);
+    }
+  }, [filteredSymbols, subscribeAllVisible]);
 
   return (
     <div className="space-y-6">
@@ -78,12 +87,15 @@ export const DashboardPage: React.FC = () => {
             </div>
 
             <button
-              onClick={() => loadActiveSymbols()}
+              onClick={() => {
+                loadActiveSymbols();
+                fetchUserAccounts();
+              }}
               disabled={isInitializing}
-              className="px-4 py-3 bg-gradient-to-r from-slate-900 to-slate-800 hover:from-slate-800 hover:to-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-2xl flex items-center gap-2 transition shadow-lg shrink-0"
+              className="px-4 py-3 bg-gradient-to-r from-slate-900 to-slate-800 hover:from-slate-800 hover:to-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-2xl flex items-center gap-2 transition shadow-lg shrink-0 cursor-pointer"
             >
               <RefreshCw className={`w-4 h-4 text-cyan-400 ${isInitializing ? 'animate-spin' : ''}`} />
-              <span>Sync Symbols</span>
+              <span>Sync Feeds</span>
             </button>
           </div>
         </div>
@@ -98,13 +110,13 @@ export const DashboardPage: React.FC = () => {
               { id: 'ALL', label: 'All Markets' },
               { id: 'VOL', label: 'Volatility' },
               { id: '1S', label: '1-Sec Volatility' },
-              { id: 'CRASH_BOOM', label: 'Crash / Boom' },
+              { id: 'CRASH_BOOM', label: 'Crash / Boom / Jump' },
             ] as const
           ).map((tab) => (
             <button
               key={tab.id}
               onClick={() => setSelectedCategory(tab.id)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                 selectedCategory === tab.id
                   ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-950/50'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
@@ -120,7 +132,7 @@ export const DashboardPage: React.FC = () => {
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
             type="text"
-            placeholder="Search index (e.g. R_100, 1HZ)..."
+            placeholder="Search index (e.g. 1HZ, R_100, BOOM)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl pl-10 pr-4 py-2 text-xs font-mono text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 transition"
