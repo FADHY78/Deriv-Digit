@@ -5,16 +5,19 @@ export interface OAuthAccount {
   isVirtual: boolean;
 }
 
+export const REGISTERED_APP_ID = '347FrwAYb8ptoUsbiGVsA';
+
 /**
  * Constructs the official Deriv OAuth redirect URL for browser authentication.
  * Uses /callback endpoint for Deriv app redirect requirement.
  */
-export function getDerivOAuthUrl(appId: string = '1089'): string {
+export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
+  const effectiveAppId = appId || (import.meta as any).env?.VITE_DERIV_APP_ID || REGISTERED_APP_ID;
 
   // Official Deriv OAuth authorize endpoint
-  return `https://oauth.deriv.com/oauth2/authorize?app_id=${appId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
+  return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
   )}`;
 }

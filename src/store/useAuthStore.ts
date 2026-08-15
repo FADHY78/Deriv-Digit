@@ -17,13 +17,15 @@ const STORAGE_KEY_REMEMBER = 'deriv_remember_me';
 const STORAGE_KEY_APP_ID = 'deriv_app_id';
 const STORAGE_KEY_OAUTH_ACCTS = 'deriv_oauth_accounts';
 
-// Initial load check with optional VITE_DERIV_APP_ID env support
+// Deriv Registered App ID for https://deriv-digit-three.vercel.app/callback
+export const DEFAULT_DERIV_APP_ID = '347FrwAYb8ptoUsbiGVsA';
+
 const envAppId = (import.meta as any).env?.VITE_DERIV_APP_ID || '';
 const initialRemember = localStorage.getItem(STORAGE_KEY_REMEMBER) === 'true';
 const initialToken = initialRemember
   ? localStorage.getItem(STORAGE_KEY_TOKEN) || ''
   : sessionStorage.getItem(STORAGE_KEY_TOKEN) || '';
-const initialAppId = localStorage.getItem(STORAGE_KEY_APP_ID) || envAppId || '1089';
+const initialAppId = localStorage.getItem(STORAGE_KEY_APP_ID) || envAppId || DEFAULT_DERIV_APP_ID;
 
 const rawOAuthAccts = localStorage.getItem(STORAGE_KEY_OAUTH_ACCTS);
 const initialOAuthAccts: OAuthAccount[] = rawOAuthAccts ? JSON.parse(rawOAuthAccts) : [];
