@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
@@ -10,8 +10,22 @@ import { AnalysisPage } from './pages/AnalysisPage';
 import { PositionsPage } from './pages/PositionsPage';
 import { JournalPage } from './pages/JournalPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { derivSocket } from './lib/derivSocket';
+import { useMarketStore } from './store/useMarketStore';
+import { useAuthStore } from './store/useAuthStore';
 
 export function App() {
+  useEffect(() => {
+    // 1. Establish persistent WebSocket live feed connection
+    derivSocket.connect().catch((err) => {
+      console.warn('[App] Initial socket connection error:', err);
+    });
+
+    // 2. Load active symbols and accounts
+    useMarketStore.getState().loadActiveSymbols();
+    useAuthStore.getState().fetchUserAccounts();
+  }, []);
+
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-[#06090f] text-slate-100 flex flex-col font-sans">
