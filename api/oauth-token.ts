@@ -17,7 +17,7 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { code, clientId, clientSecret, redirectUri } = req.body || {};
+  const { code, clientId, clientSecret, redirectUri, codeVerifier } = req.body || {};
 
   if (!code) {
     return res.status(400).json({ error: 'Missing authorization code' });
@@ -33,6 +33,10 @@ export default async function handler(req: any, res: any) {
       code: code,
       redirect_uri: effectiveRedirectUri,
     });
+
+    if (codeVerifier) {
+      params.append('code_verifier', codeVerifier);
+    }
 
     const secret = clientSecret || process.env.DERIV_CLIENT_SECRET;
     if (secret) {

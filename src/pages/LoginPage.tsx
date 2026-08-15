@@ -134,13 +134,20 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Method 3: 1-Click Deriv OAuth
-  const handleOAuthLogin = () => {
-    if (inputAppId !== appId) {
-      setAppId(inputAppId);
+  // Method 3: 1-Click Deriv OAuth with PKCE & State
+  const handleOAuthLogin = async () => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      if (inputAppId !== appId) {
+        setAppId(inputAppId);
+      }
+      const oauthUrl = await getDerivOAuthUrl(inputAppId);
+      window.location.href = oauthUrl;
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to generate OAuth request with PKCE');
+      setIsLoading(false);
     }
-    const oauthUrl = getDerivOAuthUrl(inputAppId);
-    window.location.href = oauthUrl;
   };
 
   return (
@@ -233,11 +240,11 @@ export const LoginPage: React.FC = () => {
 
               <div className="space-y-1.5">
                 <label className="text-[11px] font-mono text-slate-400 block">
-                  Enter the App ID registered for <code className="text-amber-300 bg-slate-950 px-1 py-0.5 rounded">{window.location.origin}/callback</code>:
+                  Registered App ID for <code className="text-amber-300 bg-slate-950 px-1 py-0.5 rounded">{window.location.origin}/callback</code>:
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. 68924 (or leave default 1089)"
+                  placeholder="347FrwAYb8ptoUsbiGVsA"
                   value={inputAppId}
                   onChange={(e) => setInputAppId(e.target.value)}
                   className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-red-500 transition"
@@ -245,7 +252,7 @@ export const LoginPage: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed font-mono">
-                💡 When registering on <strong className="text-slate-200">api.deriv.com/apps/manage</strong>, set Redirect URL to: <code className="text-cyan-300 bg-slate-950 px-1.5 py-0.5 rounded">{window.location.origin}/callback</code>.
+                💡 Registered with PKCE (S256) & State CSRF validation.
               </p>
             </div>
 
@@ -256,12 +263,12 @@ export const LoginPage: React.FC = () => {
               className="w-full py-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-red-950/60 flex items-center justify-center gap-3 transition transform active:scale-95 cursor-pointer"
             >
               <ExternalLink className="w-4 h-4" />
-              <span>{isLoading ? 'Redirecting to Deriv...' : 'Log in with Deriv Account in Browser'}</span>
+              <span>{isLoading ? 'Generating PKCE & Redirecting...' : 'Log in with Deriv Account in Browser'}</span>
             </button>
 
             <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono pt-1">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Uses official Deriv OAuth session. You will be redirected back automatically.</span>
+              <span>Secured with PKCE (SHA-256) code challenge and random state verification.</span>
             </div>
           </div>
         )}

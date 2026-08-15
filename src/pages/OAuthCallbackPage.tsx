@@ -56,18 +56,24 @@ export const OAuthCallbackPage: React.FC = () => {
         return;
       }
 
-      // Clean up state
+      // Clean up saved state
       if (savedState) {
         sessionStorage.removeItem('oauth_state');
       }
 
+      // Retrieve PKCE code verifier
+      const codeVerifier = sessionStorage.getItem('oauth_code_verifier') || '';
+      if (codeVerifier) {
+        sessionStorage.removeItem('oauth_code_verifier');
+      }
+
       let oauthAccounts = parseOAuthResponse(params);
 
-      // 5. If code is received (Authorization Code Flow from auth.deriv.com)
+      // 5. If code is received (Authorization Code Flow with PKCE from auth.deriv.com)
       const code = params.get('code');
       if (oauthAccounts.length === 0 && code) {
         try {
-          oauthAccounts = await exchangeOAuthCodeForTokens(code, appId);
+          oauthAccounts = await exchangeOAuthCodeForTokens(code, appId, codeVerifier);
         } catch (exchangeErr: any) {
           setStatus('error');
           setErrorMessage(
@@ -142,7 +148,7 @@ export const OAuthCallbackPage: React.FC = () => {
             </div>
             <h2 className="text-xl font-bold text-white">Authorizing Deriv Session</h2>
             <p className="text-xs text-slate-400 font-mono">
-              Validating OAuth state and exchanging authorization code...
+              Validating PKCE challenge & exchanging authorization code...
             </p>
           </div>
         )}

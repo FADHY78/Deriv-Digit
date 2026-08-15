@@ -8,33 +8,81 @@ export interface OAuthAccount {
 export const REGISTERED_APP_ID = '347FrwAYb8ptoUsbiGVsA';
 
 /**
- * Constructs the official Deriv OAuth redirect URL for browser authentication.
- * Generates a secure random state (crypto.randomUUID()), stores it in sessionStorage,
- * and appends &state= to satisfy Deriv's security requirements.
+ * Generates a random PKCE code verifier string (43-128 characters).
  */
-export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
+export function generateCodeVerifier(): string {
+  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  const array = new Uint8Array(64);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(array);
+  } else {
+    for (let i = 0; i < 64; i++) {
+      array[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  let result = '';
+  for (let i = 0; i < array.length; i++) {
+    result += charset[array[i] % charset.length];
+  }
+  return result;
+}
+
+/**
+ * Generates a base64url-encoded SHA-256 code challenge from a code verifier.
+ */
+export async function generateCodeChallenge(verifier: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+
+  if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    const bytes = new Uint8Array(digest);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+
+  // Fallback
+  return verifier;
+}
+
+/**
+ * Constructs the official Deriv OAuth redirect URL for browser authentication with PKCE & State.
+ * Follows exact format: https://auth.deriv.com/oauth2/auth?client_id=YOUR_APP_ID&response_type=code&redirect_uri=...&state=...&code_challenge=...&code_challenge_method=S256
+ */
+export async function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): Promise<string> {
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
   const effectiveAppId = (appId || (import.meta as any).env?.VITE_DERIV_APP_ID || REGISTERED_APP_ID).trim();
 
-  // Generate secure random state of at least 8 characters
+  // 1. Generate Secure Random State (at least 8 characters)
   let state = '';
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     state = crypto.randomUUID();
   } else {
     state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
   }
-
-  // Store state for validation on callback
   sessionStorage.setItem('oauth_state', state);
 
-  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA), use auth.deriv.com with response_type=code & state
+  // 2. Generate PKCE Code Verifier & Challenge
+  const codeVerifier = generateCodeVerifier();
+  sessionStorage.setItem('oauth_code_verifier', codeVerifier);
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA), use auth.deriv.com with PKCE
   const isAlphanumeric = /[a-zA-Z]/.test(effectiveAppId);
 
   if (isAlphanumeric) {
     return `https://auth.deriv.com/oauth2/auth?client_id=${effectiveAppId}&response_type=code&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&state=${encodeURIComponent(state)}`;
+    )}&state=${encodeURIComponent(state)}&code_challenge=${encodeURIComponent(
+      codeChallenge
+    )}&code_challenge_method=S256`;
   }
 
   // Otherwise use legacy numeric app_id endpoint
@@ -45,11 +93,12 @@ export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
 
 /**
  * Exchanges OAuth2 authorization code via serverless backend route (/api/oauth-token)
- * or fallback direct to https://auth.deriv.com/oauth2/token
+ * or fallback direct to https://auth.deriv.com/oauth2/token with PKCE code_verifier
  */
 export async function exchangeOAuthCodeForTokens(
   code: string,
-  clientId: string = REGISTERED_APP_ID
+  clientId: string = REGISTERED_APP_ID,
+  codeVerifier: string = ''
 ): Promise<OAuthAccount[]> {
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
@@ -67,6 +116,7 @@ export async function exchangeOAuthCodeForTokens(
         code,
         clientId,
         redirectUri,
+        codeVerifier,
       }),
     });
 
@@ -85,6 +135,10 @@ export async function exchangeOAuthCodeForTokens(
       code: code,
       redirect_uri: redirectUri,
     });
+
+    if (codeVerifier) {
+      body.append('code_verifier', codeVerifier);
+    }
 
     const response = await fetch('https://auth.deriv.com/oauth2/token', {
       method: 'POST',
