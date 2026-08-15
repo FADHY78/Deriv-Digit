@@ -17,12 +17,13 @@ const STORAGE_KEY_REMEMBER = 'deriv_remember_me';
 const STORAGE_KEY_APP_ID = 'deriv_app_id';
 const STORAGE_KEY_OAUTH_ACCTS = 'deriv_oauth_accounts';
 
-// Initial load check
+// Initial load check with optional VITE_DERIV_APP_ID env support
+const envAppId = (import.meta as any).env?.VITE_DERIV_APP_ID || '';
 const initialRemember = localStorage.getItem(STORAGE_KEY_REMEMBER) === 'true';
 const initialToken = initialRemember
   ? localStorage.getItem(STORAGE_KEY_TOKEN) || ''
   : sessionStorage.getItem(STORAGE_KEY_TOKEN) || '';
-const initialAppId = localStorage.getItem(STORAGE_KEY_APP_ID) || '1089';
+const initialAppId = localStorage.getItem(STORAGE_KEY_APP_ID) || envAppId || '1089';
 
 const rawOAuthAccts = localStorage.getItem(STORAGE_KEY_OAUTH_ACCTS);
 const initialOAuthAccts: OAuthAccount[] = rawOAuthAccts ? JSON.parse(rawOAuthAccts) : [];
