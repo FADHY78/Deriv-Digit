@@ -9,27 +9,87 @@ export const REGISTERED_APP_ID = '347FrwAYb8ptoUsbiGVsA';
 
 /**
  * Constructs the official Deriv OAuth redirect URL for browser authentication.
- * Automatically chooses between Deriv OAuth2 (auth.deriv.com with client_id) for alphanumeric IDs
- * and Legacy OAuth (oauth.deriv.com with app_id) for numeric IDs.
+ * Uses response_type=code for OAuth2 compliance with auth.deriv.com.
  */
 export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
   const effectiveAppId = (appId || (import.meta as any).env?.VITE_DERIV_APP_ID || REGISTERED_APP_ID).trim();
 
-  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA from api.deriv.com), use auth.deriv.com
+  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA from api.deriv.com), use auth.deriv.com with response_type=code
   const isAlphanumeric = /[a-zA-Z]/.test(effectiveAppId);
 
   if (isAlphanumeric) {
     return `https://auth.deriv.com/oauth2/auth?client_id=${effectiveAppId}&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&response_type=token`;
+    )}&response_type=code`;
   }
 
   // Otherwise use numeric app_id endpoint
   return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
   )}`;
+}
+
+/**
+ * Exchanges OAuth2 authorization code with Deriv auth server at https://auth.deriv.com/oauth2/token
+ */
+export async function exchangeOAuthCodeForTokens(
+  code: string,
+  clientId: string = REGISTERED_APP_ID
+): Promise<OAuthAccount[]> {
+  const currentOrigin = window.location.origin;
+  const redirectUri = `${currentOrigin}/callback`;
+
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: clientId,
+    code: code,
+    redirect_uri: redirectUri,
+  });
+
+  const response = await fetch('https://auth.deriv.com/oauth2/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: body.toString(),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    throw new Error(
+      data.error_description ||
+      data.error ||
+      data.message ||
+      'Failed to exchange authorization code for access tokens'
+    );
+  }
+
+  const accounts: OAuthAccount[] = [];
+
+  if (Array.isArray(data.accounts)) {
+    data.accounts.forEach((acc: any) => {
+      accounts.push({
+        accountId: acc.account_id || acc.loginid || acc.id || 'DERIV_ACCOUNT',
+        token: acc.token || data.access_token,
+        currency: acc.currency || 'USD',
+        isVirtual: Boolean(acc.is_virtual || acc.account_id?.startsWith('VRTC')),
+      });
+    });
+  }
+
+  if (accounts.length === 0 && data.access_token) {
+    accounts.push({
+      accountId: 'DERIV_USER',
+      token: data.access_token,
+      currency: 'USD',
+      isVirtual: false,
+    });
+  }
+
+  return accounts;
 }
 
 /**

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ShieldCheck, ShieldAlert, RefreshCw, ArrowRight, Zap, ExternalLink, Copy, Check } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { derivSocket } from '../lib/derivSocket';
-import { parseOAuthResponse } from '../lib/derivOAuth';
+import { parseOAuthResponse, exchangeOAuthCodeForTokens } from '../lib/derivOAuth';
 
 export const OAuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
@@ -32,12 +32,12 @@ export const OAuthCallbackPage: React.FC = () => {
       if (window.location.hash) {
         const hashContent = window.location.hash.substring(1);
         const hashParams = new URLSearchParams(hashContent);
-        if (!params.has('token1') && !params.has('token')) {
+        if (!params.has('token1') && !params.has('token') && !params.has('code')) {
           params = hashParams;
         }
       }
 
-      // 3. Check for error parameters returned from Deriv
+      // 3. Check for explicit error parameters returned from Deriv
       const error = params.get('error') || params.get('error_code');
       const errorDesc = params.get('error_description') || params.get('msg');
       if (error || errorDesc) {
@@ -46,13 +46,27 @@ export const OAuthCallbackPage: React.FC = () => {
         return;
       }
 
-      // 4. Parse Accounts / Tokens
-      const oauthAccounts = parseOAuthResponse(params);
+      let oauthAccounts = parseOAuthResponse(params);
+
+      // 4. If code is received (Authorization Code Flow from auth.deriv.com)
+      const code = params.get('code');
+      if (oauthAccounts.length === 0 && code) {
+        try {
+          oauthAccounts = await exchangeOAuthCodeForTokens(code, appId);
+        } catch (exchangeErr: any) {
+          setStatus('error');
+          setErrorMessage(
+            exchangeErr.message ||
+            'Failed to exchange authorization code with Deriv token endpoint.'
+          );
+          return;
+        }
+      }
 
       if (oauthAccounts.length === 0) {
         setStatus('error');
         setErrorMessage(
-          'No authentication tokens were received in the callback URL. Please click "Return to Login" and start the authorization from the login button.'
+          'No authentication tokens or authorization code were received. Please click "Return to Login" and start the authorization from the login button.'
         );
         return;
       }
@@ -113,7 +127,7 @@ export const OAuthCallbackPage: React.FC = () => {
             </div>
             <h2 className="text-xl font-bold text-white">Authorizing Deriv Session</h2>
             <p className="text-xs text-slate-400 font-mono">
-              Establishing secure WebSocket handshake with Deriv and loading balances...
+              Exchanging authorization code and establishing secure WebSocket handshake...
             </p>
           </div>
         )}
