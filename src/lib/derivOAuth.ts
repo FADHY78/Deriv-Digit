@@ -7,17 +7,20 @@ export interface OAuthAccount {
 
 /**
  * Constructs the official Deriv OAuth redirect URL for browser authentication.
+ * Uses /callback endpoint for Deriv app redirect requirement.
  */
 export function getDerivOAuthUrl(appId: string = '1089'): string {
   const currentOrigin = window.location.origin;
-  // Deriv OAuth endpoint: redirects back to current app origin with acctX and tokenX params
+  const redirectUri = `${currentOrigin}/callback`;
+
+  // Deriv OAuth endpoint: redirects to /callback with acctX, tokenX, and curX params
   return `https://oauth.deriv.com/oauth2/authorize?app_id=${appId}&l=en&redirect_uri=${encodeURIComponent(
-    currentOrigin + '/login'
+    redirectUri
   )}`;
 }
 
 /**
- * Parses incoming URL query parameters returned by Deriv OAuth redirect.
+ * Parses incoming URL query parameters or hash fragments returned by Deriv OAuth redirect.
  * Deriv returns parameters in format: acct1=VRTC1234&token1=xyz&cur1=USD&acct2=CR5678&token2=abc&cur2=USD...
  */
 export function parseOAuthResponse(searchParams: URLSearchParams): OAuthAccount[] {
