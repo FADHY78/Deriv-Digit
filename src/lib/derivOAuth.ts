@@ -9,26 +9,38 @@ export const REGISTERED_APP_ID = '347FrwAYb8ptoUsbiGVsA';
 
 /**
  * Constructs the official Deriv OAuth redirect URL for browser authentication.
- * Follows exact format: https://auth.deriv.com/oauth2/auth?client_id=YOUR_APP_ID&response_type=code&redirect_uri=...
+ * Generates a secure random state (crypto.randomUUID()), stores it in sessionStorage,
+ * and appends &state= to satisfy Deriv's security requirements.
  */
 export function getDerivOAuthUrl(appId: string = REGISTERED_APP_ID): string {
   const currentOrigin = window.location.origin;
   const redirectUri = `${currentOrigin}/callback`;
   const effectiveAppId = (appId || (import.meta as any).env?.VITE_DERIV_APP_ID || REGISTERED_APP_ID).trim();
 
-  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA from api.deriv.com), use auth.deriv.com with response_type=code
+  // Generate secure random state of at least 8 characters
+  let state = '';
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    state = crypto.randomUUID();
+  } else {
+    state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+
+  // Store state for validation on callback
+  sessionStorage.setItem('oauth_state', state);
+
+  // If the App ID is alphanumeric (like 347FrwAYb8ptoUsbiGVsA), use auth.deriv.com with response_type=code & state
   const isAlphanumeric = /[a-zA-Z]/.test(effectiveAppId);
 
   if (isAlphanumeric) {
     return `https://auth.deriv.com/oauth2/auth?client_id=${effectiveAppId}&response_type=code&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}`;
+    )}&state=${encodeURIComponent(state)}`;
   }
 
   // Otherwise use legacy numeric app_id endpoint
   return `https://oauth.deriv.com/oauth2/authorize?app_id=${effectiveAppId}&l=en&brand=deriv&redirect_uri=${encodeURIComponent(
     redirectUri
-  )}`;
+  )}&state=${encodeURIComponent(state)}`;
 }
 
 /**

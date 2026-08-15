@@ -46,9 +46,24 @@ export const OAuthCallbackPage: React.FC = () => {
         return;
       }
 
+      // 4. Validate returned OAuth State (CSRF protection required by Deriv)
+      const returnedState = params.get('state');
+      const savedState = sessionStorage.getItem('oauth_state');
+
+      if (savedState && returnedState && returnedState !== savedState) {
+        setStatus('error');
+        setErrorMessage('Invalid OAuth state returned by Deriv. For security reasons, authentication was stopped.');
+        return;
+      }
+
+      // Clean up state
+      if (savedState) {
+        sessionStorage.removeItem('oauth_state');
+      }
+
       let oauthAccounts = parseOAuthResponse(params);
 
-      // 4. If code is received (Authorization Code Flow from auth.deriv.com)
+      // 5. If code is received (Authorization Code Flow from auth.deriv.com)
       const code = params.get('code');
       if (oauthAccounts.length === 0 && code) {
         try {
@@ -127,7 +142,7 @@ export const OAuthCallbackPage: React.FC = () => {
             </div>
             <h2 className="text-xl font-bold text-white">Authorizing Deriv Session</h2>
             <p className="text-xs text-slate-400 font-mono">
-              Exchanging authorization code and establishing secure WebSocket handshake...
+              Validating OAuth state and exchanging authorization code...
             </p>
           </div>
         )}
