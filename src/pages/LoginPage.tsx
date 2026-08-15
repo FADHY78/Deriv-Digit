@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { KeyRound, ShieldAlert, CheckCircle2, Lock, ExternalLink, HelpCircle, UserCheck, ShieldCheck, Zap, ArrowRight, Play, Globe, Info, Copy } from 'lucide-react';
+import { KeyRound, ShieldAlert, CheckCircle2, Lock, ExternalLink, HelpCircle, UserCheck, ShieldCheck, Zap, ArrowRight, Play, Globe, Info, Copy, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { derivSocket } from '../lib/derivSocket';
-import { getDerivOAuthUrl, parseOAuthResponse } from '../lib/derivOAuth';
+import { getDerivOAuthUrl, parseOAuthResponse, REGISTERED_APP_ID } from '../lib/derivOAuth';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -21,14 +21,15 @@ export const LoginPage: React.FC = () => {
   } = useAuthStore();
 
   const [inputToken, setInputToken] = useState(token);
-  const [inputAppId, setInputAppId] = useState(appId);
+  const [inputAppId, setInputAppId] = useState(appId || REGISTERED_APP_ID);
   const [remember, setRemember] = useState(rememberMe);
-  const [activeTab, setActiveTab] = useState<'OAUTH' | 'TOKEN' | 'DEMO_SANDBOX'>('OAUTH');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showTokenLogin, setShowTokenLogin] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Automatically process incoming Deriv OAuth redirect parameters (if returning from registered OAuth)
+  // Automatically process incoming Deriv OAuth redirect parameters
   useEffect(() => {
     const oauthAccounts = parseOAuthResponse(searchParams);
 
@@ -40,7 +41,7 @@ export const LoginPage: React.FC = () => {
 
       (async () => {
         try {
-          await derivSocket.connect(inputAppId);
+          await derivSocket.connect();
           const res = await derivSocket.authorize(primaryAccount.token);
 
           if (res.error) {
@@ -68,9 +69,47 @@ export const LoginPage: React.FC = () => {
         }
       })();
     }
-  }, [searchParams, inputAppId, setToken, setAvailableOAuthAccounts, setAccountDetails, navigate]);
+  }, [searchParams, setToken, setAvailableOAuthAccounts, setAccountDetails, navigate]);
 
-  // Method 1: Connect via Deriv API Token (Instant)
+  // Primary Action: 1-Click "Continue with Deriv" (like Sign in with Google)
+  const handleDerivOAuthLogin = async () => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      if (inputAppId !== appId) {
+        setAppId(inputAppId);
+      }
+      const oauthUrl = await getDerivOAuthUrl(inputAppId);
+      window.location.href = oauthUrl;
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to initialize Deriv login');
+      setIsLoading(false);
+    }
+  };
+
+  // Alternative Method: Instant Virtual Sandbox
+  const handleInstantDemoMode = async () => {
+    setIsLoading(true);
+    setErrorMsg(null);
+
+    try {
+      await derivSocket.connect();
+      setToken('DEMO_SANDBOX_TOKEN', false);
+      setAccountDetails({
+        accountId: 'VRTC-DEMO-GUEST',
+        accountType: 'demo',
+        balance: 10000.0,
+        currency: 'USD',
+      });
+      navigate('/dashboard');
+    } catch (err: any) {
+      setErrorMsg('Failed to connect to Deriv live stream.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Alternative Method: API Token Login
   const handleTokenLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputToken.trim()) {
@@ -82,11 +121,7 @@ export const LoginPage: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      if (inputAppId !== appId) {
-        setAppId(inputAppId);
-      }
-
-      await derivSocket.connect(inputAppId);
+      await derivSocket.connect();
       const res = await derivSocket.authorize(inputToken.trim());
 
       if (res.error) {
@@ -112,284 +147,156 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  // Method 2: Instant Virtual Sandbox Mode
-  const handleInstantDemoMode = async () => {
-    setIsLoading(true);
-    setErrorMsg(null);
-
-    try {
-      await derivSocket.connect(inputAppId);
-      setToken('DEMO_SANDBOX_TOKEN', false);
-      setAccountDetails({
-        accountId: 'VRTC-DEMO-GUEST',
-        accountType: 'demo',
-        balance: 10000.0,
-        currency: 'USD',
-      });
-      navigate('/dashboard');
-    } catch (err: any) {
-      setErrorMsg('Failed to connect to Deriv WebSocket feed.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Method 3: 1-Click Deriv OAuth with PKCE & State
-  const handleOAuthLogin = async () => {
-    setIsLoading(true);
-    setErrorMsg(null);
-    try {
-      if (inputAppId !== appId) {
-        setAppId(inputAppId);
-      }
-      const oauthUrl = await getDerivOAuthUrl(inputAppId);
-      window.location.href = oauthUrl;
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to generate OAuth request with PKCE');
-      setIsLoading(false);
-    }
-  };
-
   return (
-    <div className="max-w-2xl mx-auto my-8 p-4 space-y-6">
-      {/* Top Header */}
-      <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-slate-800/80 shadow-2xl space-y-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="max-w-md mx-auto my-12 px-4 space-y-6">
+      {/* Login Card */}
+      <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-slate-800/90 shadow-2xl space-y-6 relative overflow-hidden text-center">
+        {/* Ambient Top Glow */}
+        <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-72 h-72 bg-gradient-to-b from-red-600/20 to-rose-600/5 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="text-center space-y-2 relative z-10">
-          <div className="inline-flex p-3.5 bg-gradient-to-tr from-red-600/20 to-rose-600/20 border border-red-500/30 rounded-2xl text-red-400 mb-1 shadow-lg shadow-red-950/40">
-            <KeyRound className="w-8 h-8" />
+        {/* Brand Icon & Heading */}
+        <div className="space-y-3 relative z-10">
+          <div className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-tr from-red-600 to-rose-500 rounded-2xl shadow-xl shadow-red-950/60 ring-4 ring-red-500/20 mb-1">
+            <span className="text-white font-black text-2xl tracking-tighter">D</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-            Connect Deriv Account
+            Welcome to Deriv Digit
           </h1>
-          <p className="text-xs sm:text-sm text-slate-400 max-w-lg mx-auto">
-            Authorize your browser session to stream real-time synthetic index ticks and execute digit contracts.
+          <p className="text-xs sm:text-sm text-slate-400 max-w-xs mx-auto leading-relaxed">
+            Real-time digit frequency analytics, streak detection, and high-speed execution terminal.
           </p>
         </div>
 
         {errorMsg ? (
-          <div className="p-4 bg-rose-950/80 border border-rose-700 text-rose-200 rounded-2xl text-xs flex items-start gap-3 shadow-lg shadow-rose-950/40">
-            <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+          <div className="p-3.5 bg-rose-950/80 border border-rose-700 text-rose-200 rounded-2xl text-xs flex items-start gap-2.5 shadow-lg shadow-rose-950/40 text-left">
+            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold block">Connection Notice</span>
+              <span className="font-bold block">Authentication Notice</span>
               <span className="text-slate-300">{errorMsg}</span>
             </div>
           </div>
         ) : null}
 
-        {/* Method Selector Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-2xl relative z-10 shadow-inner">
+        {/* --- MAIN ACTION: "CONTINUE WITH DERIV" (LIKE SIGN IN WITH GOOGLE) --- */}
+        <div className="space-y-3 relative z-10 pt-2">
           <button
-            type="button"
-            onClick={() => setActiveTab('OAUTH')}
-            className={`py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all ${
-              activeTab === 'OAUTH'
-                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md shadow-rose-950/50 scale-[1.02]'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+            onClick={handleDerivOAuthLogin}
+            disabled={isLoading}
+            className="w-full py-4 px-5 bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 active:scale-[0.98] text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-xl shadow-red-950/70 border border-red-400/30 flex items-center justify-center gap-3.5 transition duration-200 cursor-pointer group"
           >
-            🌐 1-Click OAuth
+            {/* Deriv Brand Icon */}
+            <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0">
+              <span className="text-red-600 font-black text-xs">d</span>
+            </div>
+            <span>{isLoading ? 'Connecting to Deriv...' : 'Continue with Deriv'}</span>
+            <ArrowRight className="w-4 h-4 text-rose-200 group-hover:translate-x-1 transition" />
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('TOKEN')}
-            className={`py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all ${
-              activeTab === 'TOKEN'
-                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-950/50 scale-[1.02]'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            🔑 API Token
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('DEMO_SANDBOX')}
-            className={`py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all ${
-              activeTab === 'DEMO_SANDBOX'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/50 scale-[1.02]'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            ⚡ Sandbox
-          </button>
+          <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-mono">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Secure 1-click login with your Deriv browser account</span>
+          </div>
         </div>
 
-        {/* --- TAB 1: DERIV OAUTH (1-CLICK BROWSER LOGIN) --- */}
-        {activeTab === 'OAUTH' && (
-          <div className="space-y-5 relative z-10 animate-in fade-in duration-200">
-            {/* App ID & Registration Helper */}
-            <div className="bg-gradient-to-br from-red-950/30 via-slate-900 to-slate-950 border border-red-500/30 rounded-2xl p-4.5 space-y-3">
-              <div className="flex items-center justify-between text-xs text-red-300 font-bold font-mono">
-                <span className="flex items-center gap-1.5">
-                  <Globe className="w-4 h-4 text-red-400" />
-                  Deriv Registered App ID
-                </span>
-                <a
-                  href="https://api.deriv.com/apps/manage"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 rounded-lg text-[11px] text-red-200 flex items-center gap-1 transition"
-                >
-                  <span>Register on api.deriv.com</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
+        {/* Divider */}
+        <div className="relative flex items-center justify-center">
+          <div className="border-t border-slate-800 w-full" />
+          <span className="bg-[#0b0f19] px-3 text-[11px] font-mono text-slate-500 uppercase tracking-widest relative">
+            or practice
+          </span>
+          <div className="border-t border-slate-800 w-full" />
+        </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-400 block">
-                  Registered App ID for <code className="text-amber-300 bg-slate-950 px-1 py-0.5 rounded">{window.location.origin}/callback</code>:
-                </label>
+        {/* Instant Sandbox Button */}
+        <div className="space-y-2 relative z-10">
+          <button
+            onClick={handleInstantDemoMode}
+            disabled={isLoading}
+            className="w-full py-3.5 px-4 bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/40 text-slate-200 hover:text-white font-bold text-xs rounded-2xl flex items-center justify-center gap-2.5 transition active:scale-[0.98] cursor-pointer shadow-sm"
+          >
+            <Play className="w-4 h-4 text-emerald-400 fill-emerald-400" />
+            <span>Open $10,000 Free Live Sandbox</span>
+          </button>
+          <p className="text-[11px] text-slate-500 font-mono">
+            Streams real live Volatility index ticks without logging in
+          </p>
+        </div>
+
+        {/* Alternative: API Token Dropdown */}
+        <div className="border-t border-slate-800/80 pt-4 text-left">
+          <button
+            onClick={() => setShowTokenLogin(!showTokenLogin)}
+            className="w-full flex items-center justify-between text-xs font-mono text-slate-400 hover:text-slate-200 py-1 transition cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
+              Sign in with Deriv API Token
+            </span>
+            {showTokenLogin ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+
+          {showTokenLogin && (
+            <form onSubmit={handleTokenLogin} className="mt-3 space-y-3 animate-in fade-in duration-200">
+              <div className="relative">
+                <Lock className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3.5" />
                 <input
-                  type="text"
-                  placeholder="347FrwAYb8ptoUsbiGVsA"
-                  value={inputAppId}
-                  onChange={(e) => setInputAppId(e.target.value)}
-                  className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-red-500 transition"
+                  type="password"
+                  placeholder="Paste token (Read + Trade)"
+                  value={inputToken}
+                  onChange={(e) => setInputToken(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition"
                 />
               </div>
 
-              <p className="text-[11px] text-slate-400 leading-relaxed font-mono">
-                💡 Registered with PKCE (S256) & State CSRF validation.
-              </p>
-            </div>
-
-            {/* OAuth Login CTA */}
-            <button
-              onClick={handleOAuthLogin}
-              disabled={isLoading}
-              className="w-full py-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-red-950/60 flex items-center justify-center gap-3 transition transform active:scale-95 cursor-pointer"
-            >
-              <ExternalLink className="w-4 h-4" />
-              <span>{isLoading ? 'Generating PKCE & Redirecting...' : 'Log in with Deriv Account in Browser'}</span>
-            </button>
-
-            <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono pt-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Secured with PKCE (SHA-256) code challenge and random state verification.</span>
-            </div>
-          </div>
-        )}
-
-        {/* --- TAB 2: API TOKEN --- */}
-        {activeTab === 'TOKEN' && (
-          <form onSubmit={handleTokenLogin} className="space-y-5 relative z-10 animate-in fade-in duration-200">
-            <div className="bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-950 border border-cyan-500/30 rounded-2xl p-4.5 space-y-3">
-              <div className="flex items-center justify-between text-xs text-cyan-300 font-bold font-mono">
-                <span className="flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-cyan-400" />
-                  Instant Token Login:
-                </span>
+              <div className="flex items-center justify-between text-[11px]">
+                <label className="flex items-center gap-1.5 text-slate-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                    className="rounded border-slate-800 bg-slate-900 text-cyan-500"
+                  />
+                  <span>Remember me</span>
+                </label>
                 <a
                   href="https://app.deriv.com/account/api-token"
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2.5 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 rounded-lg text-[11px] text-cyan-200 flex items-center gap-1 transition"
+                  className="text-cyan-400 hover:underline flex items-center gap-1"
                 >
-                  <span>Open Deriv API Tokens</span>
-                  <ExternalLink className="w-3 h-3" />
+                  <span>Get token</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
                 </a>
               </div>
 
-              <ol className="text-xs text-slate-300 space-y-1 list-decimal list-inside font-mono">
-                <li>Go to Deriv &gt; <strong>Settings &gt; API Token</strong></li>
-                <li>Check <strong>Read</strong> and <strong>Trade</strong> permissions</li>
-                <li>Click <strong>Create</strong>, copy the token, and paste it below</li>
-              </ol>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider block">
-                Deriv API Token
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
-                <input
-                  type="password"
-                  placeholder="Paste token here (e.g. a1-XyZ987654321...)"
-                  value={inputToken}
-                  onChange={(e) => setInputToken(e.target.value)}
-                  className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl pl-10 pr-4 py-3 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 ring-1 focus:ring-cyan-500/20 transition"
-                />
-              </div>
-            </div>
-
-            <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                className="mt-0.5 rounded border-slate-800 bg-slate-900 text-cyan-500 focus:ring-cyan-500"
-              />
-              <div>
-                <span className="font-semibold text-white">Remember session on this device</span>
-                <p className="text-[11px] text-slate-500">
-                  {remember
-                    ? '⚠️ Token saved in browser localStorage.'
-                    : 'Token saved in sessionStorage (cleared when closing tab).'}
-                </p>
-              </div>
-            </label>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold text-sm rounded-2xl transition shadow-xl shadow-cyan-950/60 flex items-center justify-center gap-2.5 cursor-pointer transform active:scale-95"
-            >
-              <Zap className="w-4 h-4" />
-              <span>{isLoading ? 'Connecting to Deriv WebSocket...' : 'Authenticate & Open Terminal'}</span>
-            </button>
-          </form>
-        )}
-
-        {/* --- TAB 3: INSTANT SANDBOX DEMO --- */}
-        {activeTab === 'DEMO_SANDBOX' && (
-          <div className="space-y-5 relative z-10 animate-in fade-in duration-200">
-            <div className="bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-950 border border-emerald-500/30 rounded-2xl p-5 space-y-3">
-              <div className="flex items-center gap-2 text-emerald-400 font-bold font-mono text-sm">
-                <Play className="w-5 h-5" />
-                <span>Instant Sandbox Practice Terminal</span>
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Want to test the digit analyzer right away without logging into Deriv?
-              </p>
-              <ul className="text-xs text-slate-400 space-y-1.5 list-disc list-inside font-mono">
-                <li>Streams 100% live, real-time tick data directly from Deriv Volatility indices</li>
-                <li>Pre-loaded with $10,000.00 virtual practice balance</li>
-                <li>Full access to digit frequency charts, streak trackers, and simulation orders</li>
-              </ul>
-            </div>
-
-            <button
-              onClick={handleInstantDemoMode}
-              disabled={isLoading}
-              className="w-full py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-emerald-950/60 flex items-center justify-center gap-2.5 transition transform active:scale-95 cursor-pointer"
-            >
-              <Play className="w-4 h-4" />
-              <span>{isLoading ? 'Connecting Live Stream...' : 'Launch Instant Live Sandbox'}</span>
-            </button>
-          </div>
-        )}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs font-mono rounded-xl transition shadow-md"
+              >
+                Authenticate Token
+              </button>
+            </form>
+          )}
+        </div>
 
         {/* Existing Available OAuth Accounts Switcher */}
         {availableOAuthAccounts && availableOAuthAccounts.length > 0 ? (
-          <div className="border-t border-slate-800/80 pt-4 space-y-2.5">
-            <label className="text-xs font-mono font-bold text-slate-300 flex items-center gap-2 uppercase tracking-wider">
-              <UserCheck className="w-4 h-4 text-emerald-400" />
-              Saved Accounts ({availableOAuthAccounts.length})
+          <div className="border-t border-slate-800/80 pt-4 space-y-2 text-left">
+            <label className="text-[11px] font-mono font-bold text-slate-400 flex items-center gap-1.5 uppercase">
+              <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+              Switch Account ({availableOAuthAccounts.length})
             </label>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {availableOAuthAccounts.map((acct) => (
                 <button
                   key={acct.accountId}
                   onClick={() => selectOAuthAccount(acct)}
-                  className="w-full p-3 bg-slate-900/80 border border-slate-800 hover:border-cyan-500/40 rounded-2xl text-left flex items-center justify-between transition-all"
+                  className="w-full p-2.5 bg-slate-950/80 border border-slate-800 hover:border-cyan-500/40 rounded-xl text-left flex items-center justify-between transition-all"
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2">
                     <span
-                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                      className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
                         acct.isVirtual
                           ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                           : 'bg-rose-950 text-rose-300 border border-rose-800'
@@ -399,9 +306,9 @@ export const LoginPage: React.FC = () => {
                     </span>
                     <span className="text-xs font-mono font-bold text-white">{acct.accountId}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                  <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400">
                     <span>{acct.currency}</span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                    <ArrowRight className="w-3 h-3 text-slate-500" />
                   </div>
                 </button>
               ))}
